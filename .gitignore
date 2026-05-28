@@ -17,11 +17,11 @@ venv/
 orfujdbc-*.jar
 *.jar
 
-# Client BI Publisher data models — contain client-specific SQL
-# REMOVE these lines if you want the RAG Catalog Library tab populated in
-# production AND the repo is private. Never commit these to a public repo.
-*.xdm.catalog
-Data Models.catalog
+# Client BI Publisher data models — committed because the repo is PRIVATE
+# and the RAG Catalog Library tab needs them in production.
+# If this repo ever goes public, re-add the excludes:
+#   *.xdm.catalog
+#   Data Models.catalog
 
 # Local sandbox / scratch
 procurement_test_scenarios.sql
