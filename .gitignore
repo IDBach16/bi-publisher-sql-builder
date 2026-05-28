@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# JDBC driver — 81 MB, exceeds GitHub's 100 MB hard cap and 50 MB warning
+orfujdbc-*.jar
+*.jar
+
+# Client BI Publisher data models — contain client-specific SQL
+# REMOVE these lines if you want the RAG Catalog Library tab populated in
+# production AND the repo is private. Never commit these to a public repo.
+*.xdm.catalog
+Data Models.catalog
+
+# Local sandbox / scratch
+procurement_test_scenarios.sql
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
