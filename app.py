@@ -34,6 +34,103 @@ def _get_secret(key, default=""):
     except Exception:
         pass
     return os.getenv(key, default)
+
+
+# ---------------------------------------------------------------------------
+# BIP Catalog (.xdm.catalog) loader - RAG knowledge base
+# (defined early so the sidebar can call load_catalog_library() at import time)
+# ---------------------------------------------------------------------------
+def _decompress_catalog(path):
+    with open(path, "rb") as f:
+        raw = f.read()
+    try:
+        return zlib.decompress(raw).decode("utf-8", errors="replace")
+    except zlib.error:
+        return zlib.decompress(raw, -zlib.MAX_WBITS).decode("utf-8", errors="replace")
+
+
+def parse_xdm_catalog(path):
+    """Parse a .xdm.catalog file and pull out the data model XML, its
+    description, SQL datasets, and parameters."""
+    file_name = os.path.basename(path)
+    try:
+        decoded = _decompress_catalog(path)
+    except Exception as e:
+        return {"name": file_name, "error": f"decompress failed: {e}"}
+
+    xml_start = decoded.find("<?xml")
+    xml_end = decoded.rfind("</dataModel>")
+    if xml_start == -1 or xml_end == -1:
+        return {"name": file_name, "error": "no <dataModel> XML found"}
+    xml = decoded[xml_start:xml_end + len("</dataModel>")]
+
+    desc_match = re.search(
+        r"<description>\s*<!\[CDATA\[(.*?)\]\]>\s*</description>", xml, re.DOTALL
+    )
+    description = unquote(desc_match.group(1)) if desc_match else ""
+
+    sql_datasets = []
+    for ds in re.finditer(
+        r'<dataSet\s+name="([^"]+)"[^>]*>(.*?)</dataSet>', xml, re.DOTALL
+    ):
+        sql_match = re.search(
+            r"<sqlStatement[^>]*>\s*<!\[CDATA\[(.*?)\]\]>\s*</sqlStatement>",
+            ds.group(2), re.DOTALL,
+        )
+        if sql_match:
+            sql_datasets.append({
+                "name": ds.group(1),
+                "sql": sql_match.group(1).strip(),
+            })
+
+    parameters = []
+    for p in re.finditer(r"<parameter\s+([^>]+?)/?>", xml):
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', p.group(1)))
+        if attrs.get("name"):
+            parameters.append({
+                "name": attrs.get("name", ""),
+                "type": attrs.get("dataType", ""),
+                "default": attrs.get("defaultValue", ""),
+            })
+
+    return {
+        "name": file_name,
+        "description": description,
+        "sql_datasets": sql_datasets,
+        "parameters": parameters,
+        "error": None,
+    }
+
+
+@st.cache_data(show_spinner=False)
+def load_catalog_library():
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    return [parse_xdm_catalog(p) for p in sorted(glob.glob(os.path.join(app_dir, "*.xdm.catalog")))]
+
+
+def build_catalog_context(catalogs, max_chars=30000):
+    """Compact bundle of catalog SQL to inject as RAG context for Claude."""
+    parts = ["## REFERENCE: Existing BI Publisher Data Models in this workspace.",
+             "Use these production-tested SQL patterns as guidance when generating new queries.\n"]
+    total = sum(len(p) for p in parts)
+    for cat in catalogs:
+        if cat.get("error") or not cat.get("sql_datasets"):
+            continue
+        block = [f"### {cat['name']}"]
+        if cat.get("description"):
+            block.append(f"_{cat['description'][:300]}_")
+        for ds in cat["sql_datasets"]:
+            sql = ds["sql"]
+            if len(sql) > 4000:
+                sql = sql[:4000] + "\n-- ... (truncated)"
+            block.append(f"-- DataSet: {ds['name']}\n```sql\n{sql}\n```")
+        block_text = "\n".join(block) + "\n"
+        if total + len(block_text) > max_chars:
+            parts.append("\n-- (additional catalogs omitted to stay within context budget)")
+            break
+        parts.append(block_text)
+        total += len(block_text)
+    return "\n".join(parts)
 from schema import (
     ALL_TABLES, RELATIONSHIPS, SUPPORTING_TABLES, VIEWS,
     LOOKUP_VALUES, PO_HEADERS_ALL, PO_LINES_ALL,
@@ -563,102 +660,6 @@ In the BI Catalog data model editor, after setting up the bridge query (G_10), u
 - If BI Publisher parameters would be useful, include them with :P_ prefix and note them
 """
     return schema_text
-
-
-# ---------------------------------------------------------------------------
-# BIP Catalog (.xdm.catalog) loader — RAG knowledge base
-# ---------------------------------------------------------------------------
-def _decompress_catalog(path):
-    with open(path, "rb") as f:
-        raw = f.read()
-    try:
-        return zlib.decompress(raw).decode("utf-8", errors="replace")
-    except zlib.error:
-        return zlib.decompress(raw, -zlib.MAX_WBITS).decode("utf-8", errors="replace")
-
-
-def parse_xdm_catalog(path):
-    """Parse a .xdm.catalog file and pull out the data model XML, its
-    description, SQL datasets, and parameters."""
-    file_name = os.path.basename(path)
-    try:
-        decoded = _decompress_catalog(path)
-    except Exception as e:
-        return {"name": file_name, "error": f"decompress failed: {e}"}
-
-    xml_start = decoded.find("<?xml")
-    xml_end = decoded.rfind("</dataModel>")
-    if xml_start == -1 or xml_end == -1:
-        return {"name": file_name, "error": "no <dataModel> XML found"}
-    xml = decoded[xml_start:xml_end + len("</dataModel>")]
-
-    desc_match = re.search(
-        r"<description>\s*<!\[CDATA\[(.*?)\]\]>\s*</description>", xml, re.DOTALL
-    )
-    description = unquote(desc_match.group(1)) if desc_match else ""
-
-    sql_datasets = []
-    for ds in re.finditer(
-        r'<dataSet\s+name="([^"]+)"[^>]*>(.*?)</dataSet>', xml, re.DOTALL
-    ):
-        sql_match = re.search(
-            r"<sqlStatement[^>]*>\s*<!\[CDATA\[(.*?)\]\]>\s*</sqlStatement>",
-            ds.group(2), re.DOTALL,
-        )
-        if sql_match:
-            sql_datasets.append({
-                "name": ds.group(1),
-                "sql": sql_match.group(1).strip(),
-            })
-
-    parameters = []
-    for p in re.finditer(r"<parameter\s+([^>]+?)/?>", xml):
-        attrs = dict(re.findall(r'(\w+)="([^"]*)"', p.group(1)))
-        if attrs.get("name"):
-            parameters.append({
-                "name": attrs.get("name", ""),
-                "type": attrs.get("dataType", ""),
-                "default": attrs.get("defaultValue", ""),
-            })
-
-    return {
-        "name": file_name,
-        "description": description,
-        "sql_datasets": sql_datasets,
-        "parameters": parameters,
-        "error": None,
-    }
-
-
-@st.cache_data(show_spinner=False)
-def load_catalog_library():
-    app_dir = os.path.dirname(os.path.abspath(__file__))
-    return [parse_xdm_catalog(p) for p in sorted(glob.glob(os.path.join(app_dir, "*.xdm.catalog")))]
-
-
-def build_catalog_context(catalogs, max_chars=30000):
-    """Compact bundle of catalog SQL to inject as RAG context for Claude."""
-    parts = ["## REFERENCE: Existing BI Publisher Data Models in this workspace.",
-             "Use these production-tested SQL patterns as guidance when generating new queries.\n"]
-    total = sum(len(p) for p in parts)
-    for cat in catalogs:
-        if cat.get("error") or not cat.get("sql_datasets"):
-            continue
-        block = [f"### {cat['name']}"]
-        if cat.get("description"):
-            block.append(f"_{cat['description'][:300]}_")
-        for ds in cat["sql_datasets"]:
-            sql = ds["sql"]
-            if len(sql) > 4000:
-                sql = sql[:4000] + "\n-- ... (truncated)"
-            block.append(f"-- DataSet: {ds['name']}\n```sql\n{sql}\n```")
-        block_text = "\n".join(block) + "\n"
-        if total + len(block_text) > max_chars:
-            parts.append("\n-- (additional catalogs omitted to stay within context budget)")
-            break
-        parts.append(block_text)
-        total += len(block_text)
-    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
