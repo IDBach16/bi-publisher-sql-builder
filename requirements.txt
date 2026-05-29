@@ -4,6 +4,10 @@ pandas>=2.0.0
 openpyxl>=3.1.0
 python-dotenv>=1.0.0
 
+# Optional AI providers — enable validating/using OpenAI and Gemini keys.
+openai>=1.0.0
+google-generativeai>=0.8.0
+
 # Live Fusion JDBC bridge (local-only). Uncomment if running where a JVM is
 # available. Streamlit Community Cloud has no JVM, so leave commented for
 # cloud deploys. The app degrades gracefully when these are missing.

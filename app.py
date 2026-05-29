@@ -25,6 +25,20 @@ try:
 except Exception:
     JDBC_AVAILABLE = False
 
+# Optional extra AI providers — only needed to validate/use OpenAI or Gemini
+# keys. Wrapped so the app still imports when these packages aren't installed.
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except Exception:
+    OPENAI_AVAILABLE = False
+
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except Exception:
+    GEMINI_AVAILABLE = False
+
 
 def _get_secret(key, default=""):
     """Prefer st.secrets (cloud) then env vars (local .env)."""
@@ -34,6 +48,82 @@ def _get_secret(key, default=""):
     except Exception:
         pass
     return os.getenv(key, default)
+
+
+# ---------------------------------------------------------------------------
+# AI provider key validation + sidebar UI
+# ---------------------------------------------------------------------------
+def _validate_anthropic(key):
+    """Lightweight auth check for an Anthropic (Claude) key."""
+    try:
+        anthropic.Anthropic(api_key=key).models.list()
+        return True, None
+    except anthropic.AuthenticationError:
+        return False, "Invalid API key"
+    except Exception as e:
+        return False, str(e)
+
+
+def _validate_openai(key):
+    """Lightweight auth check for an OpenAI key."""
+    if not OPENAI_AVAILABLE:
+        return False, "openai package not installed (add 'openai' to requirements)"
+    try:
+        OpenAI(api_key=key).models.list()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _validate_gemini(key):
+    """Lightweight auth check for a Google Gemini key."""
+    if not GEMINI_AVAILABLE:
+        return False, "google-generativeai package not installed"
+    try:
+        genai.configure(api_key=key)
+        list(genai.list_models())
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _provider_key_ui(label, secret_name, validator, help_text):
+    """Render a provider API-key input in the sidebar.
+
+    Resolves the key from secrets/env (or a password field), auto-validates it
+    once per distinct value with a popup toast, and offers a manual re-test
+    button. Returns the resolved key string (may be '').
+    """
+    loaded = _get_secret(secret_name, "")
+    if loaded:
+        key = loaded
+        st.caption(f"{label}: loaded from secrets 🔒")
+    else:
+        key = st.text_input(f"{label} API Key", type="password", help=help_text)
+
+    # Auto-validate once whenever the key value changes -> popup confirmation.
+    state_key = f"_validated_{secret_name}"
+    if key and st.session_state.get(state_key) != key:
+        ok, err = validator(key)
+        st.session_state[state_key] = key
+        st.session_state[f"_ok_{secret_name}"] = ok
+        if ok:
+            st.toast(f"{label} API key works! ✅", icon="✅")
+        else:
+            st.toast(f"{label} key error: {err}", icon="⚠️")
+
+    # Manual re-test button (also a popup).
+    if st.button(f"Test {label} key", use_container_width=True,
+                 disabled=not key, key=f"btn_test_{secret_name}"):
+        ok, err = validator(key)
+        if ok:
+            st.toast(f"{label} API key works! ✅", icon="✅")
+            st.success(f"{label} API key is valid and working.")
+        else:
+            st.toast(f"{label} key failed ❌", icon="❌")
+            st.error(f"{label} key invalid: {err}")
+
+    return key
 
 
 # ---------------------------------------------------------------------------
@@ -242,16 +332,25 @@ with st.sidebar:
     st.markdown("---")
     st.title("Settings")
 
-    env_key = _get_secret("ANTHROPIC_API_KEY", "")
-    if env_key:
-        api_key = env_key
-        st.success("API key loaded from secrets")
-    else:
-        api_key = st.text_input(
-            "Anthropic API Key",
-            type="password",
-            help="Set ANTHROPIC_API_KEY in .env (local) or Streamlit secrets (cloud), or enter here.",
-        )
+    st.subheader("🔑 AI Provider Keys")
+
+    # Anthropic (Claude) is the key used to generate SQL.
+    api_key = _provider_key_ui(
+        "Anthropic (Claude)", "ANTHROPIC_API_KEY", _validate_anthropic,
+        "Set ANTHROPIC_API_KEY in .env (local) or Streamlit secrets (cloud), or enter here.",
+    )
+
+    # Optional extra providers — stored for future use.
+    openai_key = _provider_key_ui(
+        "OpenAI", "OPENAI_API_KEY", _validate_openai,
+        "Optional. Set OPENAI_API_KEY in .env / Streamlit secrets, or enter here.",
+    )
+    gemini_key = _provider_key_ui(
+        "Google Gemini", "GEMINI_API_KEY", _validate_gemini,
+        "Optional. Set GEMINI_API_KEY in .env / Streamlit secrets, or enter here.",
+    )
+    st.session_state["openai_key"] = openai_key
+    st.session_state["gemini_key"] = gemini_key
 
     st.divider()
     st.subheader("🔌 Fusion Connection (ofjdbc)")
