@@ -894,6 +894,11 @@ def run_fusion_query(sql, host, username, password, report_path, max_rows=100):
 # ---------------------------------------------------------------------------
 # Main UI
 # ---------------------------------------------------------------------------
+# Schema provenance — bump these when the table definitions are re-verified
+# against a newer Oracle Fusion "Tables and Views" release.
+SCHEMA_ORACLE_RELEASE = "26B"
+SCHEMA_LAST_UPDATED = "2026-05-29"
+
 # Header with logo
 header_col1, header_col2 = st.columns([1, 5])
 with header_col1:
@@ -901,6 +906,10 @@ with header_col1:
 with header_col2:
     st.title("BI Publisher SQL Query Builder")
     st.caption("Oracle Fusion Cloud - Procurement | Order Management | Shipping | Financials (AP/AR)")
+    st.caption(
+        f"📅 Data tables verified against Oracle Fusion **{SCHEMA_ORACLE_RELEASE}** "
+        f"· last updated {SCHEMA_LAST_UPDATED}"
+    )
 
 # ---------------------------------------------------------------------------
 # BI Publisher Data Source Configuration
