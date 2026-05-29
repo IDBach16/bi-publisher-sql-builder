@@ -21,16 +21,16 @@ SUPPLIER_RELATIONSHIPS = {
         "POZ_SUPPLIER_CONTACTS.PER_PARTY_ID = HZ_PARTIES.PARTY_ID",
     "POZ_SUPPLIERS -> POZ_BUSINESS_CLASSIFICATIONS":
         "POZ_SUPPLIERS.VENDOR_ID = POZ_BUSINESS_CLASSIFICATIONS.VENDOR_ID",
-    "POZ_SUPPLIERS -> POZ_PRODUCTS_AND_SERVICES":
-        "POZ_SUPPLIERS.VENDOR_ID = POZ_PRODUCTS_AND_SERVICES.VENDOR_ID",
-    "POZ_PRODUCTS_AND_SERVICES -> POZ_SUPP_PROD_SERV_CAT":
-        "POZ_PRODUCTS_AND_SERVICES.CATEGORY_ID = POZ_SUPP_PROD_SERV_CAT.CATEGORY_ID",
+    "POZ_SUPPLIERS -> POZ_SUP_PRODUCTS_SERVICES":
+        "POZ_SUPPLIERS.VENDOR_ID = POZ_SUP_PRODUCTS_SERVICES.VENDOR_ID",
+    "POZ_SUP_PRODUCTS_SERVICES -> POZ_PROD_SERV_CATEGORY_V":
+        "POZ_SUP_PRODUCTS_SERVICES.CATEGORY_ID = POZ_PROD_SERV_CATEGORY_V.CATEGORY_ID",
     "POZ_SUPPLIERS -> POZ_SUPPLIER_TAX_PROFILES":
         "POZ_SUPPLIERS.PARTY_ID = POZ_SUPPLIER_TAX_PROFILES.PARTY_ID",
     "POZ_SUPPLIERS -> POZ_SUPPLIER_NOTES":
         "POZ_SUPPLIERS.VENDOR_ID = POZ_SUPPLIER_NOTES.VENDOR_ID",
-    "POZ_SUPPLIERS -> POZ_SUP_THIRD_PARTY_REL":
-        "POZ_SUPPLIERS.VENDOR_ID = POZ_SUP_THIRD_PARTY_REL.VENDOR_ID",
+    "POZ_SUPPLIER_SITES_ALL_M -> POZ_SUP_THIRDPARTY_PAYMENT_REL":
+        "POZ_SUPPLIER_SITES_ALL_M.VENDOR_SITE_ID = POZ_SUP_THIRDPARTY_PAYMENT_REL.VENDOR_SITE_ID",
     "PO_HEADERS_ALL -> POZ_SUPPLIERS":
         "PO_HEADERS_ALL.VENDOR_ID = POZ_SUPPLIERS.VENDOR_ID",
     "PO_HEADERS_ALL -> POZ_SUPPLIER_SITES_ALL_M":
@@ -41,7 +41,12 @@ SUPPLIER_RELATIONSHIPS = {
 
 
 POZ_SUPPLIERS = {
-    "description": "Supplier master. One row per supplier. NOTE: no name column here — supplier name lives on HZ_PARTIES.PARTY_NAME via PARTY_ID.",
+    "description": ("Supplier master. One row per supplier. NOTE: no name column here — supplier name lives on "
+                    "HZ_PARTIES.PARTY_NAME via PARTY_ID. Verified vs Oracle 26B: these attributes are NOT on this "
+                    "header table — TERMS_ID, PAYMENT_CURRENCY_CODE, INVOICE_CURRENCY_CODE live at site level "
+                    "(POZ_SUPPLIER_SITES_ALL_M); EMAIL_ADDRESS lives in TCA (HZ_PARTIES/HZ_CONTACT_POINTS via PARTY_ID); "
+                    "STATUS (registration) lives in POZ_SUPPLIER_REGISTRATIONS; TAXPAYER_ID is replaced by "
+                    "VAT_REGISTRATION_NUM + TAXPAYER_COUNTRY."),
     "primary_key": "VENDOR_ID",
     "key_columns": {
         "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier unique identifier"},
@@ -55,18 +60,14 @@ POZ_SUPPLIERS = {
         "PARENT_VENDOR_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Parent supplier (self-FK)"},
         "ONE_TIME_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - one-time supplier"},
         "MIN_ORDER_AMOUNT": {"type": "NUMBER", "nullable": True, "desc": "Minimum order amount"},
-        "TERMS_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Default payment terms (FK to AP_TERMS_TL)"},
-        "PAYMENT_CURRENCY_CODE": {"type": "VARCHAR2(15)", "nullable": True, "desc": "Default payment currency"},
-        "INVOICE_CURRENCY_CODE": {"type": "VARCHAR2(15)", "nullable": True, "desc": "Default invoice currency"},
         "TAX_REPORTING_NAME": {"type": "VARCHAR2(80)", "nullable": True, "desc": "1099 reporting name"},
-        "TAXPAYER_ID": {"type": "VARCHAR2(20)", "nullable": True, "desc": "Tax ID / TIN"},
+        "TAXPAYER_COUNTRY": {"type": "VARCHAR2(2)", "nullable": True, "desc": "Country for tax identity (26B; replaces TAXPAYER_ID use)"},
+        "VAT_REGISTRATION_NUM": {"type": "VARCHAR2(20)", "nullable": True, "desc": "VAT registration number (26B; replaces TAXPAYER_ID use)"},
         "FEDERAL_REPORTABLE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - 1099 reportable"},
         "STATE_REPORTABLE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - state reportable"},
         "TYPE_1099": {"type": "VARCHAR2(10)", "nullable": True, "desc": "1099 type"},
         "STANDARD_INDUSTRY_CLASS": {"type": "VARCHAR2(25)", "nullable": True, "desc": "SIC / NAICS classification code"},
-        "SUPPLIER_NOTIF_METHOD": {"type": "VARCHAR2(25)", "nullable": True, "desc": "Notification method (EMAIL, FAX, PRINT)"},
-        "EMAIL_ADDRESS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Primary email"},
-        "STATUS": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Registration status (NEW, APPROVED, REJECTED, etc.)"},
+        "BUSINESS_RELATIONSHIP": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Supplier relationship classification (26B)"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
         "LAST_UPDATE_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Last update date"},
         "ATTRIBUTE_CATEGORY": {"type": "VARCHAR2(30)", "nullable": True, "desc": "DFF context"},
@@ -82,8 +83,8 @@ POZ_SUPPLIERS_INT = {
         "VENDOR_NAME": {"type": "VARCHAR2(360)", "nullable": True, "desc": "Supplier name (only on interface — base POZ_SUPPLIERS has no name)"},
         "SEGMENT1": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Proposed supplier number"},
         "VENDOR_TYPE_LOOKUP_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Supplier type"},
-        "STATUS": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Import status (NEW, PROCESSED, REJECTED)"},
-        "REJECT_REASON": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Rejection reason if import failed"},
+        "STATUS": {"type": "VARCHAR2(20)", "nullable": True, "desc": "Import status (NEW, PROCESSED, REJECTED)"},
+        "IMPORT_ACTION": {"type": "VARCHAR2(10)", "nullable": True, "desc": "CREATE or UPDATE action flag (26B)"},
         "VENDOR_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "VENDOR_ID assigned on successful import"},
         "LOAD_REQUEST_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "ESS request that loaded the row"},
     },
@@ -98,28 +99,27 @@ POZ_SUPPLIER_SITES_ALL_M = {
         "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier FK"},
         "VENDOR_SITE_CODE": {"type": "VARCHAR2(15)", "nullable": False, "desc": "Site code (human-readable)"},
         "VENDOR_SITE_CODE_ALT": {"type": "VARCHAR2(320)", "nullable": True, "desc": "Alternate site code"},
-        "PRC_BU_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Procurement BU owning this site row"},
-        "PROCUREMENT_BU_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Same as PRC_BU_ID — alternate column name"},
-        "SUPPLIER_ADDRESS_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to POZ_SUPPLIER_ADDRESSES"},
+        "PRC_BU_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Procurement BU owning this site row (PROCUREMENT_BU_ID alias does NOT exist per docs)"},
+        "SUPPLIER_ADDRESS_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to POZ_SUPPLIER_ADDRESSES. ⚠️ docs show address FK as PARTY_SITE_ID — verify on-pod"},
         "PURCHASING_SITE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - usable for POs"},
         "PAY_SITE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - usable for AP payments"},
         "RFQ_ONLY_SITE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - RFQ only"},
         "PRIMARY_PAY_SITE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - primary pay site"},
         "INACTIVE_DATE": {"type": "DATE", "nullable": True, "desc": "Site inactive date (NULL = active)"},
         "TERMS_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Payment terms (FK to AP_TERMS_TL)"},
-        "PAYMENT_METHOD_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Default payment method"},
+        "PAYMENT_METHOD_LOOKUP_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Default payment method (renamed from PAYMENT_METHOD_CODE per docs)"},
         "PAY_GROUP_LOOKUP_CODE": {"type": "VARCHAR2(25)", "nullable": True, "desc": "Pay group"},
         "INVOICE_CURRENCY_CODE": {"type": "VARCHAR2(15)", "nullable": True, "desc": "Invoice currency"},
         "PAYMENT_CURRENCY_CODE": {"type": "VARCHAR2(15)", "nullable": True, "desc": "Payment currency"},
-        "SHIP_TO_LOCATION_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Default ship-to (FK to HR_LOCATIONS_ALL)"},
-        "BILL_TO_LOCATION_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Default bill-to"},
+        "SHIP_TO_LOCATION_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Default ship-to (FK to HR_LOCATIONS_ALL). ⚠️ not confirmed in 26B docs — verify on-pod"},
+        "BILL_TO_LOCATION_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Default bill-to. ⚠️ not confirmed in 26B docs — verify on-pod"},
         "FOB_LOOKUP_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Free-on-board terms"},
         "FREIGHT_TERMS_LOOKUP_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Freight terms"},
         "INVOICE_AMOUNT_LIMIT": {"type": "NUMBER", "nullable": True, "desc": "Max invoice amount"},
         "HOLD_ALL_PAYMENTS_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - hold all payments"},
         "HOLD_UNMATCHED_INVOICES_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - hold unmatched"},
         "TOLERANCE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Receiving tolerance ID"},
-        "INVOICE_MATCH_OPTION": {"type": "VARCHAR2(25)", "nullable": True, "desc": "PO/RECEIPT match option"},
+        "MATCH_OPTION": {"type": "VARCHAR2(25)", "nullable": True, "desc": "PO/RECEIPT match option (renamed from INVOICE_MATCH_OPTION per docs)"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
         "LAST_UPDATE_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Last update date"},
         "ATTRIBUTE_CATEGORY": {"type": "VARCHAR2(30)", "nullable": True, "desc": "DFF context (site-level DFFs)"},
@@ -128,20 +128,21 @@ POZ_SUPPLIER_SITES_ALL_M = {
 
 
 POZ_SUPPLIER_ADDRESSES = {
-    "description": "Supplier addresses. Shared across sites — one address may serve multiple POZ_SUPPLIER_SITES_ALL_M rows.",
-    "primary_key": "SUPPLIER_ADDRESS_ID",
+    "description": ("Supplier addresses. The documented object is the view POZ_SUPPLIER_ADDRESS_V, keyed by PARTY_SITE_ID "
+                    "(not SUPPLIER_ADDRESS_ID). Query the view for address detail. Purpose columns are named "
+                    "ADDRESS_PURPOSE_ORDERING / ADDRESS_PURPOSE_REMIT_TO / ADDRESS_PURPOSE_RFQ_OR_BIDDING (no billing flag)."),
+    "primary_key": "PARTY_SITE_ID",
     "key_columns": {
-        "SUPPLIER_ADDRESS_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Address unique identifier"},
+        "SUPPLIER_ADDRESS_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Address ID (base table). ⚠️ the view uses PARTY_SITE_ID — verify on-pod"},
         "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier FK"},
-        "PARTY_SITE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "TCA party site FK"},
+        "PARTY_SITE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "TCA party site FK (primary identifier on POZ_SUPPLIER_ADDRESS_V)"},
         "LOCATION_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to HZ_LOCATIONS (the actual address lines)"},
-        "ADDRESS_NAME": {"type": "VARCHAR2(240)", "nullable": True, "desc": "Address label"},
+        "PARTY_SITE_NAME": {"type": "VARCHAR2(240)", "nullable": True, "desc": "Address label (renamed from ADDRESS_NAME per view)"},
         "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive"},
         "INACTIVE_DATE": {"type": "DATE", "nullable": True, "desc": "Address inactive date"},
-        "ADDRESS_PURPOSE_BILLING_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - billing address"},
-        "ADDRESS_PURPOSE_ORDERING_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - ordering address"},
-        "ADDRESS_PURPOSE_RFQ_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - RFQ address"},
-        "ADDRESS_PURPOSE_PAY_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - remittance address"},
+        "ADDRESS_PURPOSE_ORDERING": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - ordering address (renamed from _ORDERING_FLAG)"},
+        "ADDRESS_PURPOSE_RFQ_OR_BIDDING": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - RFQ/bidding address (renamed from _RFQ_FLAG)"},
+        "ADDRESS_PURPOSE_REMIT_TO": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - remittance address (renamed from _PAY_FLAG)"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
         "LAST_UPDATE_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Last update date"},
     },
@@ -149,118 +150,129 @@ POZ_SUPPLIER_ADDRESSES = {
 
 
 POZ_SUPPLIER_CONTACTS = {
-    "description": "Supplier contacts. Contact name comes from HZ_PARTIES via PER_PARTY_ID, NOT from this table.",
+    "description": ("Supplier contacts. ⚠️ Verified vs Oracle 26B: the base table POZ_SUPPLIER_CONTACTS is a lean "
+                    "association table — name/email/phone/title columns live on the VIEW POZ_SUPPLIER_CONTACTS_V "
+                    "(denormalized from HZ_PARTIES/HZ_ORG_CONTACTS/HZ_CONTACT_POINTS). Query the _V view for contact "
+                    "detail. Phone columns on the view are PHONE / FAX / MOBILE (not *_NUMBER). VENDOR_ID is on the "
+                    "view; CONTACT_TYPE is not documented on either object."),
     "primary_key": "VENDOR_CONTACT_ID",
     "key_columns": {
         "VENDOR_CONTACT_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Contact unique identifier"},
-        "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier FK"},
+        "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier FK (present on POZ_SUPPLIER_CONTACTS_V, not the base table)"},
         "PER_PARTY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to HZ_PARTIES for contact name (PARTY_TYPE='PERSON')"},
-        "REL_PARTY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Relationship party ID"},
         "RELATIONSHIP_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "HZ_RELATIONSHIPS FK"},
-        "FIRST_NAME": {"type": "VARCHAR2(150)", "nullable": True, "desc": "Denormalized first name"},
-        "LAST_NAME": {"type": "VARCHAR2(150)", "nullable": True, "desc": "Denormalized last name"},
-        "JOB_TITLE": {"type": "VARCHAR2(100)", "nullable": True, "desc": "Title"},
-        "EMAIL_ADDRESS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Contact email"},
-        "PHONE_AREA_CODE": {"type": "VARCHAR2(10)", "nullable": True, "desc": "Phone area code"},
-        "PHONE_NUMBER": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Phone number"},
-        "PHONE_EXTENSION": {"type": "VARCHAR2(20)", "nullable": True, "desc": "Phone extension"},
-        "FAX_AREA_CODE": {"type": "VARCHAR2(10)", "nullable": True, "desc": "Fax area code"},
-        "FAX_NUMBER": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Fax number"},
-        "MOBILE_NUMBER": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Mobile number"},
-        "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive"},
+        "ORG_CONTACT_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to HZ_ORG_CONTACTS (canonical join key for contact detail)"},
+        "FIRST_NAME": {"type": "VARCHAR2(150)", "nullable": True, "desc": "First name (on POZ_SUPPLIER_CONTACTS_V)"},
+        "LAST_NAME": {"type": "VARCHAR2(150)", "nullable": True, "desc": "Last name (on POZ_SUPPLIER_CONTACTS_V)"},
+        "JOB_TITLE": {"type": "VARCHAR2(100)", "nullable": True, "desc": "Title (on POZ_SUPPLIER_CONTACTS_V)"},
+        "EMAIL_ADDRESS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Contact email (on POZ_SUPPLIER_CONTACTS_V)"},
+        "PHONE": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Phone number (view column; renamed from PHONE_NUMBER)"},
+        "PHONE_EXTENSION": {"type": "VARCHAR2(20)", "nullable": True, "desc": "Phone extension (on POZ_SUPPLIER_CONTACTS_V)"},
+        "FAX": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Fax number (view column; renamed from FAX_NUMBER)"},
+        "MOBILE": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Mobile number (view column; renamed from MOBILE_NUMBER)"},
+        "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive (on POZ_SUPPLIER_CONTACTS_V)"},
         "INACTIVE_DATE": {"type": "DATE", "nullable": True, "desc": "Contact inactive date"},
-        "CONTACT_TYPE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Contact role/type"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
         "LAST_UPDATE_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Last update date"},
     },
 }
 
 
-POZ_SUP_THIRD_PARTY_REL = {
-    "description": "Third-party payment relationships (e.g., pay supplier A via third party B).",
-    "primary_key": "THIRD_PARTY_REL_ID",
+# Renamed in current Oracle docs: POZ_SUP_THIRD_PARTY_REL -> POZ_SUP_THIRDPARTY_PAYMENT_REL,
+# with PK and third-party/date columns renamed (see desc). Old name/columns will fail on current pods.
+POZ_SUP_THIRDPARTY_PAYMENT_REL = {
+    "description": ("Third-party payment relationships (e.g., pay supplier A via third party B). Renamed from "
+                    "POZ_SUP_THIRD_PARTY_REL in current Oracle docs. VENDOR_ID and RELATIONSHIP_TYPE removed; "
+                    "supplier linkage is via VENDOR_SITE_ID."),
+    "primary_key": "TPP_RELATIONSHIP_ID",
     "key_columns": {
-        "THIRD_PARTY_REL_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Relationship unique identifier"},
-        "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Primary supplier"},
-        "VENDOR_SITE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Primary supplier site"},
-        "THIRD_PARTY_VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Third-party (payee) supplier"},
-        "THIRD_PARTY_VENDOR_SITE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Third-party site"},
-        "START_DATE": {"type": "DATE", "nullable": True, "desc": "Relationship start"},
-        "END_DATE": {"type": "DATE", "nullable": True, "desc": "Relationship end (NULL = active)"},
-        "RELATIONSHIP_TYPE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Type of relationship"},
+        "TPP_RELATIONSHIP_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Relationship unique identifier (renamed from THIRD_PARTY_REL_ID)"},
+        "VENDOR_SITE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Primary supplier site (supplier linkage)"},
+        "REMIT_TO_SUPPLIER_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Third-party (payee) supplier (renamed from THIRD_PARTY_VENDOR_ID)"},
+        "REMIT_TO_ADDRESS_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Third-party address (renamed from THIRD_PARTY_VENDOR_SITE_ID)"},
+        "FROM_DATE": {"type": "DATE", "nullable": True, "desc": "Relationship start (renamed from START_DATE)"},
+        "TO_DATE": {"type": "DATE", "nullable": True, "desc": "Relationship end, NULL = active (renamed from END_DATE)"},
+        "DEFAULT_RELATIONSHIP_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - default third-party relationship"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
     },
 }
 
 
 POZ_BUSINESS_CLASSIFICATIONS = {
-    "description": "Diversity / business classifications assigned to a supplier (small business, minority-owned, women-owned, etc.).",
-    "primary_key": "BUS_CLASSIFICATION_ID",
+    "description": ("Diversity / business classifications assigned to a supplier. Verified vs Oracle 25D: PK is "
+                    "CLASSIFICATION_ID (not BUS_CLASSIFICATION_ID); the classification type column is LOOKUP_CODE "
+                    "(not CLASSIFICATION_CODE). STATUS and START_DATE_ACTIVE are OBSOLETE — use CLASS_STATUS and START_DATE."),
+    "primary_key": "CLASSIFICATION_ID",
     "key_columns": {
-        "BUS_CLASSIFICATION_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Classification record unique ID"},
+        "CLASSIFICATION_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Classification record unique ID (renamed from BUS_CLASSIFICATION_ID)"},
         "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier FK"},
-        "CLASSIFICATION_CODE": {"type": "VARCHAR2(30)", "nullable": False, "desc": "Lookup code (e.g., MINORITY_OWNED, WOMEN_OWNED, SMALL_BUSINESS)"},
-        "CLASSIFICATION_NAME": {"type": "VARCHAR2(80)", "nullable": True, "desc": "Display name"},
-        "SUB_CLASSIFICATION_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Sub-classification lookup code"},
-        "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive"},
-        "START_DATE_ACTIVE": {"type": "DATE", "nullable": True, "desc": "Effective start"},
+        "PARTY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "TCA party identifier (modern join key alongside VENDOR_ID)"},
+        "LOOKUP_CODE": {"type": "VARCHAR2(30)", "nullable": False, "desc": "Classification lookup code, e.g. MINORITY_OWNED, WOMEN_OWNED (renamed from CLASSIFICATION_CODE)"},
+        "CLASS_STATUS": {"type": "VARCHAR2(255)", "nullable": True, "desc": "Approval workflow status: PENDING/APPROVED/REJECTED (replaces obsolete STATUS)"},
+        "START_DATE": {"type": "DATE", "nullable": True, "desc": "Certificate start date (replaces obsolete START_DATE_ACTIVE)"},
         "EXPIRATION_DATE": {"type": "DATE", "nullable": True, "desc": "Certification expiration"},
         "CERTIFICATE_NUMBER": {"type": "VARCHAR2(80)", "nullable": True, "desc": "Certificate number"},
-        "CERTIFYING_AGENCY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to POZ_BUS_CLASS_REFERENCES"},
-        "MINORITY_TYPE_LOOKUP_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Minority type (if MINORITY_OWNED)"},
-        "NOTES": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Notes"},
+        "CERTIFYING_AGENCY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "FK to POZ_CERTIFYING_AGENCIES"},
+        "EXT_ATTR_1": {"type": "VARCHAR2(240)", "nullable": True, "desc": "Minority type info (replaces MINORITY_TYPE_LOOKUP_CODE)"},
+        "NOTES": {"type": "VARCHAR2(1000)", "nullable": True, "desc": "Notes"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
     },
 }
 
 
-POZ_BUS_CLASS_REFERENCES = {
-    "description": "Certifying agencies that issue business classification certificates.",
-    "primary_key": "BUS_CLASS_REFERENCE_ID",
+# Renamed in current Oracle docs: POZ_BUS_CLASS_REFERENCES -> POZ_CERTIFYING_AGENCIES (different column set).
+POZ_CERTIFYING_AGENCIES = {
+    "description": ("Certifying agencies that issue business classification certificates. Renamed from "
+                    "POZ_BUS_CLASS_REFERENCES; PK is AGENCY_ID. AGENCY_TYPE/CONTACT_NAME/PHONE_NUMBER/WEB_ADDRESS are "
+                    "not documented; active/inactive is controlled by END_DATE (no STATUS flag)."),
+    "primary_key": "AGENCY_ID",
     "key_columns": {
-        "BUS_CLASS_REFERENCE_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Agency record ID"},
-        "AGENCY_NAME": {"type": "VARCHAR2(240)", "nullable": False, "desc": "Certifying agency name"},
-        "AGENCY_TYPE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Agency type (FEDERAL, STATE, LOCAL, PRIVATE)"},
-        "CONTACT_NAME": {"type": "VARCHAR2(240)", "nullable": True, "desc": "Agency contact"},
-        "PHONE_NUMBER": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Phone"},
-        "WEB_ADDRESS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Website"},
-        "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive"},
+        "AGENCY_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Agency record ID (renamed from BUS_CLASS_REFERENCE_ID)"},
+        "NAME": {"type": "VARCHAR2(255)", "nullable": False, "desc": "Certifying agency name (renamed from AGENCY_NAME)"},
+        "DESCRIPTION": {"type": "VARCHAR2(1000)", "nullable": True, "desc": "Agency description"},
+        "END_DATE": {"type": "DATE", "nullable": True, "desc": "Inactive date, NULL = active (replaces STATUS flag)"},
+        "OBJECT_VERSION_NUMBER": {"type": "NUMBER(9)", "nullable": True, "desc": "Optimistic locking version"},
     },
 }
 
 
-POZ_PRODUCTS_AND_SERVICES = {
-    "description": "Products and services a supplier provides (mapped to procurement categories).",
-    "primary_key": "PROD_SERV_ID",
+# Renamed in current Oracle docs: POZ_PRODUCTS_AND_SERVICES -> POZ_SUP_PRODUCTS_SERVICES; PK CLASSIFICATION_ID.
+POZ_SUP_PRODUCTS_SERVICES = {
+    "description": ("Products and services a supplier provides (mapped to procurement categories). Renamed from "
+                    "POZ_PRODUCTS_AND_SERVICES; PK is CLASSIFICATION_ID. CATEGORY_TYPE/START_DATE_ACTIVE/END_DATE_ACTIVE "
+                    "are not documented on this table (CATEGORY_TYPE exists only on the import table POZ_SUP_PROD_SERV_INT)."),
+    "primary_key": "CLASSIFICATION_ID",
     "key_columns": {
-        "PROD_SERV_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Product/service record ID"},
+        "CLASSIFICATION_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Product/service record ID (renamed from PROD_SERV_ID)"},
         "VENDOR_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Supplier FK"},
-        "CATEGORY_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "FK to POZ_SUPP_PROD_SERV_CAT / EGP_CATEGORIES_B"},
-        "CATEGORY_TYPE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "PURCHASING / BROWSING"},
-        "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive"},
-        "START_DATE_ACTIVE": {"type": "DATE", "nullable": True, "desc": "Effective start"},
-        "END_DATE_ACTIVE": {"type": "DATE", "nullable": True, "desc": "Effective end"},
+        "CATEGORY_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "FK to POZ_PROD_SERV_CATEGORY_V / EGP_CATEGORIES_B"},
+        "PURCHASING_CAT_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - purchasing category assignment"},
+        "STATUS": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Status (widened to 30 per docs)"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
     },
 }
 
 
-POZ_SUPP_PROD_SERV_CAT = {
-    "description": "Reference list of procurement categories available for supplier products/services.",
+# Not found in current Oracle docs as POZ_SUPP_PROD_SERV_CAT. Documented object is the view POZ_PROD_SERV_CATEGORY_V.
+POZ_PROD_SERV_CATEGORY_V = {
+    "description": ("Reference list of procurement categories for supplier products/services. ⚠️ POZ_SUPP_PROD_SERV_CAT "
+                    "is not in current Oracle docs — the documented object is the view POZ_PROD_SERV_CATEGORY_V "
+                    "(CATEGORY_ID, CATEGORY_NAME, PURCHASING_CAT_FLAG only). CATEGORY_CODE/PARENT_CATEGORY_ID/DESCRIPTION/STATUS "
+                    "are not documented; for category hierarchy/detail join EGP_CATEGORIES_B."),
     "primary_key": "CATEGORY_ID",
     "key_columns": {
         "CATEGORY_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Category ID"},
         "CATEGORY_NAME": {"type": "VARCHAR2(240)", "nullable": False, "desc": "Category display name"},
-        "CATEGORY_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Category code"},
-        "PARENT_CATEGORY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Parent in hierarchy"},
-        "DESCRIPTION": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Description"},
-        "STATUS": {"type": "VARCHAR2(1)", "nullable": True, "desc": "A=Active, I=Inactive"},
+        "PURCHASING_CAT_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - purchasing category"},
     },
 }
 
 
 POZ_QUAL_REC_OWNERSHIPS = {
-    "description": "Qualification record ownership — who owns/maintains a supplier qualification.",
+    "description": ("⚠️ UNVERIFIED: not found in Oracle 25D/26A Procurement docs. The POZ supplier model has no POZ_QUAL* "
+                    "tables; qualification data is documented under the POQ_ prefix (POQ_QUALIFICATIONS, "
+                    "POQ_EVALUATION_TEAM). May be a custom/internal table — confirm on-pod before use. "
+                    "Qualification record ownership — who owns/maintains a supplier qualification."),
     "primary_key": "QUAL_REC_OWNERSHIP_ID",
     "key_columns": {
         "QUAL_REC_OWNERSHIP_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Ownership record ID"},
@@ -276,7 +288,9 @@ POZ_QUAL_REC_OWNERSHIPS = {
 
 
 POZ_SUPPLIER_TAX_PROFILES = {
-    "description": "Supplier tax profile (one row per supplier party). Tax registrations live in ZX tables.",
+    "description": ("Supplier tax profile (one row per supplier party). ⚠️ The authoritative documented table is "
+                    "ZX_PARTY_TAX_PROFILE (owner ZX, Financials/Tax) — query that name. All columns below match it "
+                    "except REPORTING_AUTHORITY_ID, which does not exist (use REPORTING_AUTHORITY_FLAG Y/N)."),
     "primary_key": "PARTY_TAX_PROFILE_ID",
     "key_columns": {
         "PARTY_TAX_PROFILE_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Tax profile unique ID"},
@@ -289,14 +303,16 @@ POZ_SUPPLIER_TAX_PROFILES = {
         "ALLOW_OFFSET_TAX_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - allow offset tax"},
         "SELF_ASSESS_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - self-assess"},
         "TAX_CLASSIFICATION_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Default tax classification"},
-        "REPORTING_AUTHORITY_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Reporting authority"},
+        "REPORTING_AUTHORITY_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - reporting authority (replaces non-existent REPORTING_AUTHORITY_ID)"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation date"},
     },
 }
 
 
 POZ_SUPPLIER_NOTES = {
-    "description": "Notes attached to a supplier (free-text annotations from buyers).",
+    "description": ("⚠️ UNVERIFIED / likely non-standard: POZ_SUPPLIER_NOTES does not appear in Oracle's 25D Procurement "
+                    "Tables and Views docs (every other POZ_SUPPLIER_* table is listed). Do not assume this exists on a "
+                    "stock Fusion pod — confirm before use. Notes attached to a supplier (free-text annotations from buyers)."),
     "primary_key": "NOTE_ID",
     "key_columns": {
         "NOTE_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Note unique ID"},
@@ -312,7 +328,11 @@ POZ_SUPPLIER_NOTES = {
 
 
 POZ_SUPPLIER_ATTACHMENTS = {
-    "description": "Pointer table to attachments on a supplier record. Actual file metadata is in FND_ATTACHED_DOCUMENTS / FND_DOCUMENTS_TL.",
+    "description": ("⚠️ UNVERIFIED / likely non-standard: POZ_SUPPLIER_ATTACHMENTS is not in Oracle docs (25B–26B). The only "
+                    "documented POZ attachment object is the import table POZ_SUP_ATTACHMENTS_INT, and operational supplier "
+                    "attachments live in the generic FND_ATTACHED_DOCUMENTS / FND_DOCUMENTS framework. ATTACHMENT_PURPOSE "
+                    "is undocumented (closest is ATTACHMENT_CATEGORY). Prefer FND_ATTACHED_DOCUMENTS joined via "
+                    "ENTITY_NAME='POZ_SUPPLIERS' and PK1_VALUE."),
     "primary_key": "ATTACHMENT_ID",
     "key_columns": {
         "ATTACHMENT_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Attachment link ID"},
@@ -332,11 +352,11 @@ ALL_SUPPLIER_TABLES = {
     "POZ_SUPPLIER_SITES_ALL_M": POZ_SUPPLIER_SITES_ALL_M,
     "POZ_SUPPLIER_ADDRESSES": POZ_SUPPLIER_ADDRESSES,
     "POZ_SUPPLIER_CONTACTS": POZ_SUPPLIER_CONTACTS,
-    "POZ_SUP_THIRD_PARTY_REL": POZ_SUP_THIRD_PARTY_REL,
+    "POZ_SUP_THIRDPARTY_PAYMENT_REL": POZ_SUP_THIRDPARTY_PAYMENT_REL,
     "POZ_BUSINESS_CLASSIFICATIONS": POZ_BUSINESS_CLASSIFICATIONS,
-    "POZ_BUS_CLASS_REFERENCES": POZ_BUS_CLASS_REFERENCES,
-    "POZ_PRODUCTS_AND_SERVICES": POZ_PRODUCTS_AND_SERVICES,
-    "POZ_SUPP_PROD_SERV_CAT": POZ_SUPP_PROD_SERV_CAT,
+    "POZ_CERTIFYING_AGENCIES": POZ_CERTIFYING_AGENCIES,
+    "POZ_SUP_PRODUCTS_SERVICES": POZ_SUP_PRODUCTS_SERVICES,
+    "POZ_PROD_SERV_CATEGORY_V": POZ_PROD_SERV_CATEGORY_V,
     "POZ_QUAL_REC_OWNERSHIPS": POZ_QUAL_REC_OWNERSHIPS,
     "POZ_SUPPLIER_TAX_PROFILES": POZ_SUPPLIER_TAX_PROFILES,
     "POZ_SUPPLIER_NOTES": POZ_SUPPLIER_NOTES,
@@ -358,7 +378,7 @@ SUPPLIER_LOOKUP_VALUES = {
         "REJECTED - Rejected during onboarding",
         "INACTIVE - Disabled",
     ],
-    "CLASSIFICATION_CODE (POZ_BUSINESS_CLASSIFICATIONS)": [
+    "LOOKUP_CODE (POZ_BUSINESS_CLASSIFICATIONS)": [
         "MINORITY_OWNED",
         "WOMEN_OWNED",
         "SMALL_BUSINESS",
@@ -368,7 +388,7 @@ SUPPLIER_LOOKUP_VALUES = {
         "DISADVANTAGED_BUSINESS",
         "LGBT_OWNED",
     ],
-    "INVOICE_MATCH_OPTION (POZ_SUPPLIER_SITES_ALL_M)": [
+    "MATCH_OPTION (POZ_SUPPLIER_SITES_ALL_M)": [
         "PO - 2-way / 3-way / 4-way match to PO",
         "RECEIPT - Match against receipts",
     ],

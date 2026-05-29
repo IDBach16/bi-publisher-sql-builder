@@ -63,15 +63,10 @@ WFTASK = {
         "ASSIGNEDDATE": {"type": "TIMESTAMP", "nullable": True, "desc": "When the task was assigned to current approver — use for 'days pending' calc"},
         "UPDATEDDATE": {"type": "TIMESTAMP", "nullable": True, "desc": "Last update timestamp"},
         "ENDDATE": {"type": "TIMESTAMP", "nullable": True, "desc": "When the task completed (NULL while ASSIGNED)"},
-        "EXPIRATIONDATE": {"type": "TIMESTAMP", "nullable": True, "desc": "When the task will auto-escalate/expire"},
-        "ROOTTASKID": {"type": "VARCHAR2(64)", "nullable": True, "desc": "Root task in chained approvals (multi-stage routing)"},
-        "PARENTTASKID": {"type": "VARCHAR2(64)", "nullable": True, "desc": "Parent task in nested approvals"},
+        "EXPIRATIONDATE": {"type": "DATE", "nullable": True, "desc": "When the task will auto-escalate/expire"},
         "TASKDEFINITIONNAME": {"type": "VARCHAR2(200)", "nullable": True, "desc": "Logical task definition name"},
         "WORKFLOWPATTERN": {"type": "VARCHAR2(40)", "nullable": True, "desc": "SINGLE_APPROVER, PARALLEL, SERIAL, MGMT_CHAIN"},
-        "PRODUCTNAME": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Source product (PRC, AP, OM, etc.)"},
-        "PRODUCTTYPE": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Product sub-type"},
-        "CATEGORY": {"type": "VARCHAR2(100)", "nullable": True, "desc": "Task category"},
-        "TASKDISPLAYURL": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Deep link to task in BPM Worklist"},
+        "COMPOSITEINSTANCEID": {"type": "VARCHAR2(200)", "nullable": True, "desc": "BPM composite/process instance — common join key to PO/Req headers"},
     },
 }
 
@@ -105,21 +100,24 @@ WFTASKHISTORY = {
         "UPDATEDDATE": {"type": "TIMESTAMP", "nullable": True, "desc": "When this version was written"},
         "ASSIGNEDUSERS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Comma-delimited list of users assigned at this version"},
         "ASSIGNEDGROUPS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Comma-delimited list of groups assigned at this version"},
-        "COMMENTS": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Action comments"},
+        "USERCOMMENT": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Action comments (real column name; NOT 'COMMENTS')"},
     },
 }
 
 
 WFCOMMENTS = {
-    "description": "Comments on a BPM task (approver notes beyond what's in PO_ACTION_HISTORY.NOTE).",
-    "primary_key": "COMMENTID",
+    "description": ("Comments on a BPM task (approver notes beyond PO_ACTION_HISTORY.NOTE). ⚠️ Verified vs Oracle SOA DDL: "
+                    "no COMMENTID surrogate key — identity is composite (TASKID, VERSION). The comment body column is "
+                    "WFCOMMENT VARCHAR2(2000) (NOT TASKCOMMENT/CLOB). There is no CREATEDBY/CREATEDDATE — use UPDATEDBY/COMMENTDATE."),
+    "primary_key": ["TASKID", "VERSION"],
     "key_columns": {
-        "COMMENTID": {"type": "NUMBER", "nullable": False, "desc": "Comment ID"},
         "TASKID": {"type": "VARCHAR2(64)", "nullable": False, "desc": "FK to WFTASK.TASKID"},
-        "CREATEDBY": {"type": "VARCHAR2(256)", "nullable": True, "desc": "Username who added the comment"},
-        "CREATEDDATE": {"type": "TIMESTAMP", "nullable": True, "desc": "When the comment was added"},
-        "TASKCOMMENT": {"type": "CLOB", "nullable": True, "desc": "Comment body"},
-        "UPDATEDBY": {"type": "VARCHAR2(256)", "nullable": True, "desc": "Last updated by"},
+        "VERSION": {"type": "NUMBER", "nullable": False, "desc": "Composite PK component"},
+        "WFCOMMENT": {"type": "VARCHAR2(2000)", "nullable": True, "desc": "Comment body (real column; replaces TASKCOMMENT)"},
+        "UPDATEDBY": {"type": "VARCHAR2(64)", "nullable": True, "desc": "Username who added/updated the comment"},
+        "UPDATEDBYDISPLAYNAME": {"type": "VARCHAR2(200)", "nullable": True, "desc": "Display name of the commenter"},
+        "COMMENTDATE": {"type": "DATE", "nullable": True, "desc": "When the comment was written (replaces CREATEDDATE)"},
+        "ACTION": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Workflow action taken (APPROVE, REJECT, etc.)"},
     },
 }
 
@@ -140,7 +138,11 @@ WFATTACHMENT = {
 
 
 HWF_TASKS_B = {
-    "description": "Hosted Workflow Foundation — newer Fusion tables for human workflow tasks. Equivalent to WFTASK in some pods. Try this if WFTASK is not accessible.",
+    "description": ("Hosted Workflow Foundation human-task table. ⚠️ Not in Oracle's published EDM. The DOCUMENTED, "
+                    "supported equivalent is FND_BPM_TASK_B / view FND_BPM_TASK_VL, which differs significantly: "
+                    "TASK_ID is VARCHAR2(64) (not NUMBER), STATE→STATUS_CODE, OUTCOME→OUTCOME_CODE, and it has no "
+                    "TASK_TYPE/PRIORITY/OWNER_USER_ID/CREATOR_USER_ID/PRODUCT_CODE/APPLICATION_ID. Prefer FND_BPM_TASK_VL "
+                    "for supported reporting; the HWF_/WF* SOA tables may not be queryable on all pods."),
     "primary_key": "TASK_ID",
     "key_columns": {
         "TASK_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Task unique identifier"},
@@ -202,7 +204,8 @@ HWF_TASK_HISTORY = {
 
 
 PER_USERS = {
-    "description": "HR/Security users — bridge from BPM usernames (WFASSIGNEE.ASSIGNEE) to PERSON_ID for joining to PER_PERSON_NAMES_F_V.",
+    "description": ("HR/Security users — bridge from BPM usernames (WFASSIGNEE.ASSIGNEE) to PERSON_ID for joining to "
+                    "PER_PERSON_NAMES_F_V. NOTE: no EMAIL_ADDRESS column here — join PER_EMAIL_ADDRESSES on PERSON_ID for email."),
     "primary_key": "USER_ID",
     "key_columns": {
         "USER_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "User unique identifier"},
@@ -211,7 +214,8 @@ PER_USERS = {
         "ACTIVE_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - user is active"},
         "START_DATE": {"type": "DATE", "nullable": True, "desc": "User effective start"},
         "END_DATE": {"type": "DATE", "nullable": True, "desc": "User effective end (NULL = active)"},
-        "EMAIL_ADDRESS": {"type": "VARCHAR2(240)", "nullable": True, "desc": "Email"},
+        "SUSPENDED": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Y/N - account suspended (distinct from ACTIVE_FLAG)"},
+        # EMAIL_ADDRESS is NOT on PER_USERS — join PER_EMAIL_ADDRESSES on PERSON_ID for email.
     },
 }
 

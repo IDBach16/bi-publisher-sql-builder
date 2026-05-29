@@ -140,7 +140,7 @@ EGP_ITEM_REVISIONS_V = {
         "ECN_INITIATION_DATE": {"type": "DATE", "desc": "Engineering Change Notice initiation date"},
         "CHANGE_LINE_ID": {"type": "NUMBER(18)", "desc": "Change order line FK"},
         "CURRENT_PHASE_ID": {"type": "NUMBER(18)", "desc": "Lifecycle phase FK"},
-        "ALT_REVISION_CODE": {"type": "VARCHAR2(30)", "desc": "Alternate revision code"},
+        "ALT_REVISION_CODE": {"type": "VARCHAR2(40)", "desc": "Alternate revision code"},
     },
 }
 
@@ -174,8 +174,10 @@ EGP_ITEM_REVISIONS_B_V = {
 
 EGP_MFG_PART_NUMBERS = {
     "description": (
-        "View for manufacturer part numbers. "
-        "Links items to manufacturer part numbers and manufacturer IDs."
+        "View for manufacturer part numbers. Links items to manufacturer part numbers and manufacturer IDs. "
+        "⚠️ Not re-verified in the 2026-05-29 audit (agent timeout). In 26B the backing object is "
+        "EGP_MFG_PART_NUMBERS_B_V where the PK is ITEM_RELATIONSHIP_ID and date columns are START_DATE_ACTIVE/"
+        "END_DATE_ACTIVE — confirm column names on-pod before relying on this view."
     ),
     "schema": "FUSION",
     "owner": "EGP",
@@ -450,10 +452,9 @@ EGP_SYSTEM_ITEMS_B = {
         "LAST_UPDATE_LOGIN": {"type": "VARCHAR2(32)", "nullable": True, "desc": "Session login of last updater"},
         "REQUEST_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "ESS job request ID"},
 
-        # --- Trading Partner ---
-        "TRADING_PARTNER_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Trading partner identifier"},
-        "TP_TYPE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "CUSTOMER/MANUFACTURER/COMPETITOR/SUPPLIER"},
-        "TP_ITEM_NUMBER": {"type": "VARCHAR2(150)", "nullable": True, "desc": "Trading partner item number"},
+        # --- Trading Partner: NOT on EGP_SYSTEM_ITEMS_B. These live in EGP_TRADING_PARTNER_ITEMS;
+        #     join that table by INVENTORY_ITEM_ID. Referencing TRADING_PARTNER_ID/TP_TYPE/TP_ITEM_NUMBER
+        #     on EGP_SYSTEM_ITEMS_B raises ORA-00904. ---
 
         # --- Misc ---
         "COMPLETENESS_SCORE": {"type": "NUMBER(3)", "nullable": True, "desc": "Item data completeness percentage"},
@@ -522,7 +523,7 @@ EGP_CATEGORIES_B = {
     "tablespace": "FUSION_TS_TX_DATA",
     "columns": {
         "CATEGORY_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Category unique identifier (PK)"},
-        "CATEGORY_CODE": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Unique user-readable category code"},
+        "CATEGORY_CODE": {"type": "VARCHAR2(820)", "nullable": True, "desc": "Unique user-readable category code"},
         "SEGMENT1": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Key flexfield segment 1"},
         "SEGMENT2": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Key flexfield segment 2"},
         "SEGMENT3": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Key flexfield segment 3 (up to segment 20)"},
@@ -789,7 +790,7 @@ EGP_ITEM_REVISIONS_B = {
         "IMPLEMENTATION_DATE": {"type": "DATE", "nullable": True, "desc": "Implementation date"},
         "CHANGE_LINE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Change order line FK"},
         "CURRENT_PHASE_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Lifecycle phase FK"},
-        "ALT_REVISION_CODE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Alternate revision code"},
+        "ALT_REVISION_CODE": {"type": "VARCHAR2(40)", "nullable": True, "desc": "Alternate revision code"},
         "OBJECT_VERSION_NUMBER": {"type": "NUMBER(9)", "nullable": False, "desc": "Optimistic locking"},
         "ATTRIBUTE_CATEGORY": {"type": "VARCHAR2(30)", "nullable": True, "desc": "DFF structure"},
         "ATTRIBUTE1": {"type": "VARCHAR2(240)", "nullable": True, "desc": "DFF segment 1 (through 15)"},
@@ -836,13 +837,13 @@ EGP_ITEM_RELATIONSHIPS_B = {
         "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Source item FK"},
         "ORGANIZATION_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Organization FK"},
         "RELATED_ITEM_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Target/related item FK"},
-        "RELATIONSHIP_TYPE_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Type of relationship"},
+        "ITEM_RELATIONSHIP_TYPE": {"type": "VARCHAR2(30)", "nullable": False, "desc": "Relationship type code, e.g. SUBSTITUTE/ITEM_XREF (renamed from RELATIONSHIP_TYPE_ID; now a VARCHAR2 code)"},
         "RECIPROCAL_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Relationship is bidirectional"},
-        "START_DATE": {"type": "DATE", "nullable": True, "desc": "Effective start date"},
-        "END_DATE": {"type": "DATE", "nullable": True, "desc": "Effective end date"},
+        "START_DATE_ACTIVE": {"type": "DATE", "nullable": True, "desc": "Effective start date (renamed from START_DATE)"},
+        "END_DATE_ACTIVE": {"type": "DATE", "nullable": True, "desc": "Effective end date (renamed from END_DATE)"},
         "OBJECT_VERSION_NUMBER": {"type": "NUMBER(9)", "nullable": False, "desc": "Optimistic locking"},
-        "ATTRIBUTE_CATEGORY": {"type": "VARCHAR2(30)", "nullable": True, "desc": "DFF structure"},
-        "ATTRIBUTE1": {"type": "VARCHAR2(240)", "nullable": True, "desc": "DFF segment 1 (through 15)"},
+        "ATTRIBUTE_CATEGORY": {"type": "VARCHAR2(150)", "nullable": True, "desc": "DFF structure"},
+        "ATTRIBUTE1": {"type": "VARCHAR2(150)", "nullable": True, "desc": "DFF segment 1 (through 15)"},
         "CREATION_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Row creation timestamp"},
         "CREATED_BY": {"type": "VARCHAR2(64)", "nullable": False, "desc": "Creator"},
         "LAST_UPDATE_DATE": {"type": "TIMESTAMP", "nullable": False, "desc": "Last update timestamp"},
@@ -865,15 +866,15 @@ EGP_ITEM_CLASSES_B = {
         "Defines the classification hierarchy for items. "
         "Each item class can have its own set of EFF attribute groups."
     ),
-    "primary_key": ["ITEM_CATALOG_GROUP_ID"],
+    "primary_key": ["ITEM_CLASS_ID"],
     "schema": "FUSION",
     "owner": "EGP",
     "tablespace": "REFERENCE",
     "columns": {
-        "ITEM_CATALOG_GROUP_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Item class unique identifier (PK)"},
-        "PARENT_CATALOG_GROUP_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Parent item class (hierarchy)"},
+        "ITEM_CLASS_ID": {"type": "NUMBER(18)", "nullable": False, "desc": "Item class unique identifier, PK (renamed from ITEM_CATALOG_GROUP_ID)"},
+        "ITEM_CLASS_CODE": {"type": "VARCHAR2(80)", "nullable": False, "desc": "Internal code for the item class (replaces INTERNAL_NAME)"},
+        "PARENT_ITEM_CLASS_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Parent item class, hierarchy (renamed from PARENT_CATALOG_GROUP_ID)"},
         "ITEM_CREATION_ALLOWED_FLAG": {"type": "VARCHAR2(1)", "nullable": True, "desc": "Items can be created in this class"},
-        "INTERNAL_NAME": {"type": "VARCHAR2(80)", "nullable": True, "desc": "Internal class name"},
         "OBJECT_VERSION_NUMBER": {"type": "NUMBER(9)", "nullable": False, "desc": "Optimistic locking"},
         "ATTRIBUTE_CATEGORY": {"type": "VARCHAR2(30)", "nullable": True, "desc": "DFF structure"},
         "ATTRIBUTE1": {"type": "VARCHAR2(240)", "nullable": True, "desc": "DFF segment 1 (through 15)"},
@@ -886,7 +887,7 @@ EGP_ITEM_CLASSES_B = {
 
 EGP_ITEM_CLASSES_TL = {
     "description": "Translation table for item classes. Provides translatable CLASS_NAME and DESCRIPTION.",
-    "primary_key": ["ITEM_CATALOG_GROUP_ID", "LANGUAGE"],
+    "primary_key": ["ITEM_CLASS_ID", "LANGUAGE"],
     "schema": "FUSION",
     "owner": "EGP",
 }
@@ -902,14 +903,14 @@ EGO_ITEM_ASSOCIATIONS = {
     "schema": "FUSION",
     "owner": "EGO",
     "key_columns": {
-        "ITEM_ASSOCIATION_ID": {"type": "NUMBER(18)", "desc": "Row PK"},
+        "ASSOCIATION_ID": {"type": "NUMBER(18)", "desc": "Row PK (renamed from ITEM_ASSOCIATION_ID)"},
         "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK"},
         "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
-        "TRADING_PARTNER_ID": {"type": "NUMBER(18)", "desc": "Trading partner FK"},
-        "TP_TYPE": {"type": "VARCHAR2(30)", "desc": "CUSTOMER/MANUFACTURER/SUPPLIER"},
-        "TP_ITEM_NUMBER": {"type": "VARCHAR2(150)", "desc": "Trading partner item number"},
-        "START_DATE": {"type": "DATE", "desc": "Effective start date"},
-        "END_DATE": {"type": "DATE", "desc": "Effective end date"},
+        "SUPPLIER_ID": {"type": "NUMBER(18)", "desc": "Supplier FK (replaces generic TRADING_PARTNER_ID; table is supplier-scoped)"},
+        "SUPPLIER_SITE_ID": {"type": "NUMBER(18)", "desc": "Supplier site FK"},
+        "PRIMARY_FLAG": {"type": "VARCHAR2(1)", "desc": "Y/N - primary supplier association"},
+        "VERSION_START_DATE": {"type": "DATE", "desc": "Effective start date (renamed from START_DATE)"},
+        "VERSION_END_DATE": {"type": "DATE", "desc": "Effective end date (renamed from END_DATE)"},
     },
 }
 
@@ -923,7 +924,8 @@ EGP_ITEM_ORG_ASSOCIATIONS = {
     "key_columns": {
         "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK"},
         "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
-        "MASTER_ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Master organization FK"},
+        "INVENTORY_ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Inventory organization FK (MASTER_ORGANIZATION_ID is not documented on this table)"},
+        "ITEM_DEFINITION_ORG_ID": {"type": "NUMBER(18)", "desc": "Item-defining (master) organization FK — use for master-org lookups"},
     },
 }
 
@@ -934,14 +936,15 @@ EGP_MFG_PART_NUMBERS_B = {
     ),
     "schema": "FUSION",
     "owner": "EGP",
+    # In 26B exposed as the view EGP_MFG_PART_NUMBERS_B_V (built on EGP_ITEM_RELATIONSHIPS_B + EGP_TRADING_PARTNER_ITEMS).
     "key_columns": {
-        "MFG_PART_NUM_ID": {"type": "NUMBER(18)", "desc": "Row PK"},
+        "ITEM_RELATIONSHIP_ID": {"type": "NUMBER(18)", "desc": "Row PK (renamed from MFG_PART_NUM_ID)"},
         "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK"},
         "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
         "MANUFACTURER_ID": {"type": "NUMBER(18)", "desc": "Manufacturer FK"},
         "MFG_PART_NUM": {"type": "VARCHAR2(150)", "desc": "Manufacturer part number"},
-        "START_DATE": {"type": "DATE", "desc": "Effective start date"},
-        "END_DATE": {"type": "DATE", "desc": "Effective end date"},
+        "START_DATE_ACTIVE": {"type": "DATE", "desc": "Effective start date (renamed from START_DATE)"},
+        "END_DATE_ACTIVE": {"type": "DATE", "desc": "Effective end date (renamed from END_DATE)"},
     },
 }
 
@@ -958,10 +961,10 @@ EGP_STRUCTURES_B = {
     "owner": "EGP",
     "key_columns": {
         "BILL_SEQUENCE_ID": {"type": "NUMBER(18)", "desc": "BOM unique identifier (PK)"},
-        "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
-        "ASSEMBLY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Assembly (parent) item FK"},
+        "COMMON_ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK (docs use COMMON_ORGANIZATION_ID, not ORGANIZATION_ID; assembly item via PK1_VALUE/PK2_VALUE)"},
+        "COMMON_ASSEMBLY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Assembly (parent) item FK (docs use COMMON_ASSEMBLY_ITEM_ID, not ASSEMBLY_ITEM_ID)"},
         "STRUCTURE_TYPE_ID": {"type": "NUMBER(18)", "desc": "Structure type FK"},
-        "ALTERNATE_BOM_DESIGNATOR": {"type": "VARCHAR2(40)", "desc": "Alternate BOM name (NULL = primary)"},
+        "ALTERNATE_BOM_DESIGNATOR": {"type": "VARCHAR2(80)", "desc": "Alternate BOM name (NULL = primary)"},
         "EFFECTIVITY_CONTROL": {"type": "NUMBER", "desc": "Date/Model/Unit effectivity"},
     },
 }
@@ -976,7 +979,7 @@ EGP_COMPONENTS_B = {
     "key_columns": {
         "COMPONENT_SEQUENCE_ID": {"type": "NUMBER(18)", "desc": "Component unique identifier (PK)"},
         "BILL_SEQUENCE_ID": {"type": "NUMBER(18)", "desc": "Parent BOM FK -> EGP_STRUCTURES_B"},
-        "COMPONENT_ITEM_ID": {"type": "NUMBER(18)", "desc": "Child item FK -> EGP_SYSTEM_ITEMS_B"},
+        "PK1_VALUE": {"type": "VARCHAR2(240)", "desc": "Child item INVENTORY_ITEM_ID as string (replaces COMPONENT_ITEM_ID); TO_NUMBER(PK1_VALUE) to join EGP_SYSTEM_ITEMS_B"},
         "COMPONENT_QUANTITY": {"type": "NUMBER", "desc": "Required quantity per assembly"},
         "EFFECTIVITY_DATE": {"type": "DATE", "desc": "Component effective from date"},
         "DISABLE_DATE": {"type": "DATE", "desc": "Component effective to date"},
@@ -1041,7 +1044,8 @@ INV_ORGANIZATION_DEFINITIONS_V = {
         "ORGANIZATION_CODE": {"type": "VARCHAR2(18)", "desc": "Organization short code"},
         "ORGANIZATION_NAME": {"type": "VARCHAR2(240)", "desc": "Organization display name"},
         "BUSINESS_GROUP_ID": {"type": "NUMBER(18)", "desc": "Business group FK"},
-        "OPERATING_UNIT": {"type": "NUMBER(18)", "desc": "Operating unit / BU FK"},
+        "BUSINESS_UNIT_ID": {"type": "NUMBER(18)", "desc": "Business unit FK (Fusion replaced EBS OPERATING_UNIT with BUSINESS_UNIT_ID/BUSINESS_UNIT_NAME)"},
+        "BUSINESS_UNIT_NAME": {"type": "VARCHAR2(240)", "desc": "Business unit name"},
         "LEGAL_ENTITY": {"type": "NUMBER(18)", "desc": "Legal entity FK"},
         "SET_OF_BOOKS_ID": {"type": "NUMBER(18)", "desc": "Ledger FK"},
     },
