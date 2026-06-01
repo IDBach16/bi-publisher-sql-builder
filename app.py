@@ -9,7 +9,9 @@ import os
 import io
 import re
 import glob
+import json
 import zlib
+from datetime import datetime, timezone
 from urllib.parse import unquote
 import streamlit as st
 import anthropic
@@ -838,6 +840,61 @@ def generate_sql(user_prompt, api_key_val):
 
 
 # ---------------------------------------------------------------------------
+# Debug assistant — diagnose failing SQL + persist debug history
+# ---------------------------------------------------------------------------
+DEBUG_MODEL = "claude-sonnet-4-20250514"
+DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_history.jsonl")
+
+
+def debug_sql(sql, error, context, api_key_val):
+    """Call Claude to diagnose a failing BI Publisher SQL query and propose a fix.
+    Uses the full schema system prompt so column/table errors can be resolved."""
+    client = anthropic.Anthropic(api_key=api_key_val)
+    user_msg = (
+        "A BI Publisher SQL query failed against Oracle Fusion Cloud. Using the schema "
+        "reference above, diagnose the ROOT CAUSE and return a corrected query.\n\n"
+        f"MODULE / CONTEXT: {context or 'not specified'}\n\n"
+        "FAILING SQL:\n```sql\n" + sql.strip() + "\n```\n\n"
+        "ERROR / SYMPTOM:\n" + (error.strip() or "(none provided)") + "\n\n"
+        "Respond in this structure:\n"
+        "1. **Diagnosis** — the specific cause (wrong column/table, missing join, type mismatch, "
+        "base-table-vs-view, etc.).\n"
+        "2. **Fix** — a corrected ```sql``` block.\n"
+        "3. **Notes** — anything else to watch for."
+    )
+    message = client.messages.create(
+        model=DEBUG_MODEL,
+        max_tokens=4096,
+        system=build_system_prompt(),
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    return message.content[0].text
+
+
+def append_debug_record(record):
+    """Append one debug record (dict) to the local JSONL history file."""
+    with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def load_debug_history():
+    """Return all stored debug records (list of dicts), newest first. Tolerates bad lines."""
+    if not os.path.exists(DEBUG_LOG_PATH):
+        return []
+    records = []
+    with open(DEBUG_LOG_PATH, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return list(reversed(records))
+
+
+# ---------------------------------------------------------------------------
 # ofjdbc - Live Fusion query execution
 # ---------------------------------------------------------------------------
 def get_jdbc_jar_path():
@@ -932,7 +989,7 @@ with st.container(border=True):
         st.markdown("**Modules Covered**")
         st.markdown("Procurement | Suppliers | Items | Requisitions | AP | AR | OM | Shipping | Payments | Cash")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 AI Query Generator", "📝 Example Queries", "📖 Quick Reference", "📚 Catalog Library", "🗂️ Schema Explorer"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🤖 AI Query Generator", "📝 Example Queries", "📖 Quick Reference", "📚 Catalog Library", "🗂️ Schema Explorer", "🐞 Debug"])
 
 # ---- TAB 1: AI Generator ----
 with tab1:
@@ -1391,6 +1448,103 @@ with tab5:
             with st.expander(f"🧭 Documented join keys involving this table ({len(related)})", expanded=False):
                 for rel, join in related.items():
                     st.markdown(f"- **{rel}**  \n  `{join}`")
+
+
+# ---- TAB 6: Debug ----
+with tab6:
+    st.subheader("🐞 SQL Debug Assistant")
+    st.caption(
+        "Paste a BI Publisher query that failed plus its Oracle error. Claude diagnoses it "
+        "against the full schema and proposes a fix. Every debug session is saved to "
+        "`debug_history.jsonl` so you can export them and feed them back later."
+    )
+
+    # Pre-fill from the last generated SQL if available
+    default_dbg_sql = ""
+    if "last_result" in st.session_state and "```sql" in st.session_state["last_result"]:
+        default_dbg_sql = st.session_state["last_result"].split("```sql", 1)[1].split("```", 1)[0].strip()
+
+    dbg_module = st.selectbox(
+        "Module / context (optional)",
+        options=list(MODULE_PREFIX_MAP.keys()),
+        key="dbg_module",
+    )
+    dbg_sql = st.text_area("Failing SQL", value=default_dbg_sql, height=220, key="dbg_sql")
+    dbg_error = st.text_area(
+        'Oracle error / symptom  (e.g. ORA-00904: "TP_TYPE": invalid identifier)',
+        height=90, key="dbg_error",
+    )
+    dbg_btn = st.button("🔍 Debug with Claude", type="primary", width="stretch")
+
+    if dbg_btn:
+        if not api_key:
+            st.error("Please enter your Anthropic API key in the sidebar.")
+        elif not dbg_sql.strip():
+            st.warning("Paste the failing SQL first.")
+        else:
+            with st.spinner("Claude is debugging your query..."):
+                try:
+                    diagnosis = debug_sql(dbg_sql, dbg_error, dbg_module, api_key)
+                    record = {
+                        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "module": dbg_module,
+                        "sql": dbg_sql.strip(),
+                        "error": dbg_error.strip(),
+                        "diagnosis": diagnosis,
+                        "model": DEBUG_MODEL,
+                    }
+                    append_debug_record(record)
+                    st.session_state["last_debug"] = record
+                except anthropic.AuthenticationError:
+                    st.error("Invalid API key. Please check your Anthropic API key.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    if "last_debug" in st.session_state:
+        st.divider()
+        st.markdown("#### Diagnosis & Fix")
+        st.markdown(st.session_state["last_debug"]["diagnosis"])
+        st.success("Saved to debug_history.jsonl ✓")
+
+    # ---- Debug history ----
+    st.divider()
+    history = load_debug_history()
+    st.markdown(f"#### 📒 Debug History ({len(history)})")
+    if not history:
+        st.caption("No debug sessions recorded yet.")
+    else:
+        chrono = list(reversed(history))  # oldest -> newest for export
+        jsonl_blob = "\n".join(json.dumps(r, ensure_ascii=False) for r in chrono)
+        df_hist = pd.DataFrame(history)
+        dl1, dl2 = st.columns(2)
+        dl1.download_button(
+            "💾 Download history (JSONL)", data=jsonl_blob,
+            file_name="debug_history.jsonl", mime="application/json", key="dl_dbg_jsonl",
+        )
+        dl2.download_button(
+            "💾 Download history (CSV)", data=df_hist.to_csv(index=False),
+            file_name="debug_history.csv", mime="text/csv", key="dl_dbg_csv",
+        )
+
+        hist_search = st.text_input("Search history (SQL, error, or diagnosis)", key="dbg_hist_search")
+        for rec in history:
+            if hist_search:
+                needle = hist_search.lower()
+                blob = (rec.get("sql", "") + rec.get("error", "") + rec.get("diagnosis", "")).lower()
+                if needle not in blob:
+                    continue
+            label = (
+                f"{rec.get('timestamp', '?')[:19].replace('T', ' ')} · "
+                f"{rec.get('module', '')} · {(rec.get('error') or 'no error text')[:60]}"
+            )
+            with st.expander(label):
+                st.markdown("**Failing SQL**")
+                st.code(rec.get("sql", ""), language="sql")
+                if rec.get("error"):
+                    st.markdown("**Error / symptom**")
+                    st.code(rec["error"], language=None)
+                st.markdown("**Diagnosis & Fix**")
+                st.markdown(rec.get("diagnosis", ""))
 
 
 # ---------------------------------------------------------------------------

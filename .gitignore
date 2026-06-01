@@ -26,6 +26,9 @@ orfujdbc-*.jar
 # Local sandbox / scratch
 procurement_test_scenarios.sql
 
+# Debug assistant runtime log (export from the Debug tab to feed back)
+debug_history.jsonl
+
 # OS / IDE
 .DS_Store
 Thumbs.db
