@@ -113,7 +113,7 @@ def _provider_key_ui(label, secret_name, validator, help_text):
             st.toast(f"{label} key error: {err}", icon="⚠️")
 
     # Manual re-test button (also a popup).
-    if st.button(f"Test {label} key", use_container_width=True,
+    if st.button(f"Test {label} key", width="stretch",
                  disabled=not key, key=f"btn_test_{secret_name}"):
         ok, err = validator(key)
         if ok:
@@ -984,14 +984,14 @@ with tab1:
         df_preview, file_summary = parse_uploaded_file(uploaded_file)
         if df_preview is not None:
             with st.expander(f"Preview: {uploaded_file.name} ({len(df_preview)} rows, {len(df_preview.columns)} cols)", expanded=True):
-                st.dataframe(df_preview.head(20), use_container_width=True)
+                st.dataframe(df_preview.head(20), width="stretch")
         else:
             st.error(file_summary)
             file_summary = None
 
     col1, col2 = st.columns([1, 4])
     with col1:
-        generate_btn = st.button("🚀 Generate SQL", type="primary", use_container_width=True)
+        generate_btn = st.button("🚀 Generate SQL", type="primary", width="stretch")
 
     if generate_btn:
         if not api_key:
@@ -1050,9 +1050,9 @@ with tab1:
                 )
             with btn_col2:
                 if st.session_state.get("fusion_connected"):
-                    test_btn = st.button("⚡ Test on Fusion", type="secondary", use_container_width=True)
+                    test_btn = st.button("⚡ Test on Fusion", type="secondary", width="stretch")
                 else:
-                    test_btn = st.button("⚡ Test on Fusion", type="secondary", use_container_width=True, disabled=True,
+                    test_btn = st.button("⚡ Test on Fusion", type="secondary", width="stretch", disabled=True,
                                          help="Enter Fusion credentials in the sidebar to enable.")
 
             if st.session_state.get("fusion_connected") and test_btn:
@@ -1077,7 +1077,7 @@ with tab1:
                 st.subheader("Live Fusion Results")
                 df_result = st.session_state["fusion_result"]
                 st.caption(f"{len(df_result)} rows returned")
-                st.dataframe(df_result, use_container_width=True)
+                st.dataframe(df_result, width="stretch")
 
                 # Download results as CSV
                 csv_data = df_result.to_csv(index=False)
@@ -1350,7 +1350,7 @@ with tab5:
             st.caption(f"Showing {len(df_cols)} of {len(cols_dict)} columns")
             st.dataframe(
                 df_cols,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Column": st.column_config.TextColumn("Column", width="medium"),
