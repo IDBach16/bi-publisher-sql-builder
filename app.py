@@ -247,6 +247,31 @@ COMBINED_TABLES = {**ALL_TABLES, **ALL_OM_SHIP_FIN_TABLES, **ALL_ITEM_TABLES, **
 COMBINED_RELATIONSHIPS = {**RELATIONSHIPS, **OM_SHIP_FIN_RELATIONSHIPS, **ITEM_RELATIONSHIPS, **SUPPLIER_RELATIONSHIPS, **WORKFLOW_RELATIONSHIPS}
 COMBINED_LOOKUPS = {**LOOKUP_VALUES, **OM_SHIP_FIN_LOOKUP_VALUES, **ITEM_LOOKUP_VALUES, **SUPPLIER_LOOKUP_VALUES, **WORKFLOW_LOOKUP_VALUES}
 
+# Module -> table-name-prefix map, shared by the sidebar Schema Browser and the
+# Schema Explorer tab. str.startswith() accepts a tuple, so str and tuple prefixes
+# are handled uniformly.
+MODULE_PREFIX_MAP = {
+    "All": None,
+    "Procurement (PO)": "PO_",
+    "Suppliers (POZ)": "POZ_",
+    "Workflow (BPM)": ("WF", "HWF_", "PER_"),
+    "Order Mgmt (DOO)": "DOO_",
+    "Shipping (WSH)": "WSH_",
+    "Payables (AP)": "AP_",
+    "Receivables (AR)": "RA_",
+    "Items (EGP)": ("EGP_", "EGO_", "INV_"),
+    "Payments (IBY)": "IBY_",
+    "Cash Mgmt (CE)": "CE_",
+}
+
+
+def filter_tables_by_module(module_name):
+    """Return the subset of COMBINED_TABLES belonging to the selected module."""
+    prefix = MODULE_PREFIX_MAP.get(module_name)
+    if prefix is None:
+        return COMBINED_TABLES
+    return {k: v for k, v in COMBINED_TABLES.items() if k.startswith(prefix)}
+
 # Load .env file for API key
 load_dotenv()
 
@@ -402,29 +427,10 @@ with st.sidebar:
     # Module filter
     module_filter = st.radio(
         "Module",
-        ["All", "Procurement (PO)", "Suppliers (POZ)", "Workflow (BPM)", "Order Mgmt (DOO)", "Shipping (WSH)", "Payables (AP)", "Receivables (AR)", "Items (EGP)", "Payments (IBY)", "Cash Mgmt (CE)"],
+        list(MODULE_PREFIX_MAP.keys()),
         horizontal=True,
     )
-    prefix_map = {
-        "All": None,
-        "Procurement (PO)": "PO_",
-        "Suppliers (POZ)": "POZ_",
-        "Workflow (BPM)": ("WF", "HWF_", "PER_"),
-        "Order Mgmt (DOO)": "DOO_",
-        "Shipping (WSH)": "WSH_",
-        "Payables (AP)": "AP_",
-        "Receivables (AR)": "RA_",
-        "Items (EGP)": ("EGP_", "EGO_", "INV_"),
-        "Payments (IBY)": "IBY_",
-        "Cash Mgmt (CE)": "CE_",
-    }
-    prefix = prefix_map[module_filter]
-    if prefix is None:
-        filtered_tables = COMBINED_TABLES
-    elif isinstance(prefix, tuple):
-        filtered_tables = {k: v for k, v in COMBINED_TABLES.items() if k.startswith(prefix)}
-    else:
-        filtered_tables = {k: v for k, v in COMBINED_TABLES.items() if k.startswith(prefix)}
+    filtered_tables = filter_tables_by_module(module_filter)
 
     # Table selector
     selected_table = st.selectbox(
@@ -897,7 +903,7 @@ def run_fusion_query(sql, host, username, password, report_path, max_rows=100):
 # Schema provenance — bump these when the table definitions are re-verified
 # against a newer Oracle Fusion "Tables and Views" release.
 SCHEMA_ORACLE_RELEASE = "26B"
-SCHEMA_LAST_UPDATED = "2026-05-29"
+SCHEMA_LAST_UPDATED = "2026-06-01"
 
 # Header with logo
 header_col1, header_col2 = st.columns([1, 5])
@@ -905,7 +911,7 @@ with header_col1:
     st.image("terillium_logo.png", width=100)
 with header_col2:
     st.title("BI Publisher SQL Query Builder")
-    st.caption("Oracle Fusion Cloud - Procurement | Order Management | Shipping | Financials (AP/AR)")
+    st.caption("Oracle Fusion Cloud - Procurement | Suppliers | Items | Order Management | Shipping | Financials (AP/AR)")
     st.caption(
         f"📅 Data tables verified against Oracle Fusion **{SCHEMA_ORACLE_RELEASE}** "
         f"· last updated {SCHEMA_LAST_UPDATED}"
@@ -924,9 +930,9 @@ with st.container(border=True):
         st.code("Standard SQL", language=None)
     with ds_col3:
         st.markdown("**Modules Covered**")
-        st.markdown("Procurement | Requisitions | AP | AR | OM | Shipping")
+        st.markdown("Procurement | Suppliers | Items | Requisitions | AP | AR | OM | Shipping | Payments | Cash")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🤖 AI Query Generator", "📝 Example Queries", "📖 Quick Reference", "📚 Catalog Library"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 AI Query Generator", "📝 Example Queries", "📖 Quick Reference", "📚 Catalog Library", "🗂️ Schema Explorer"])
 
 # ---- TAB 1: AI Generator ----
 with tab1:
@@ -1273,6 +1279,120 @@ with tab4:
                     st.caption("No SQL datasets extracted.")
 
 
+# ---- TAB 5: Schema Explorer ----
+with tab5:
+    st.subheader("🗂️ Schema Explorer")
+    st.caption(
+        "Browse the full data dictionary. Pick a **module**, then a **table or view**, "
+        "to see every documented column with its type, nullability, and description — "
+        "plus the primary key, indexes, and join relationships."
+    )
+
+    # Step 1 & 2 — module then table
+    pick_col1, pick_col2 = st.columns([1, 2])
+    with pick_col1:
+        se_module = st.selectbox(
+            "1️⃣ Module",
+            options=list(MODULE_PREFIX_MAP.keys()),
+            key="se_module",
+        )
+    se_tables = filter_tables_by_module(se_module)
+    with pick_col2:
+        if se_tables:
+            se_table = st.selectbox(
+                f"2️⃣ Table / View — {len(se_tables)} in this module",
+                options=sorted(se_tables.keys()),
+                key="se_table",
+            )
+        else:
+            se_table = None
+            st.info("No tables documented for this module yet.")
+
+    if se_table:
+        tbl = COMBINED_TABLES[se_table]
+        desc = tbl["description"] if isinstance(tbl.get("description"), str) else " ".join(tbl.get("description", ""))
+        cols_dict = tbl.get("columns") or tbl.get("key_columns") or {}
+
+        st.markdown(f"### `{se_table}`")
+        st.write(desc)
+
+        # Metadata strip
+        pk = tbl.get("primary_key", "—")
+        if isinstance(pk, list):
+            pk = ", ".join(pk) if pk else "—"
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Columns", len(cols_dict))
+        m2.metric("Object", tbl.get("object_type", "TABLE"))
+        m3.metric("Schema", tbl.get("schema", "—"))
+        m4.metric("Owner", tbl.get("owner", "—"))
+        st.markdown(f"**Primary Key:** `{pk}`")
+
+        # Step 3 — columns as a data table
+        st.markdown("#### 3️⃣ Columns")
+        if cols_dict:
+            se_col_search = st.text_input("Filter columns (name or description)", key="se_col_search")
+            rows = []
+            for cname, cinfo in cols_dict.items():
+                if se_col_search:
+                    needle = se_col_search.lower()
+                    if needle not in cname.lower() and needle not in cinfo.get("desc", "").lower():
+                        continue
+                nullable_val = cinfo.get("nullable")
+                nullable = "NOT NULL" if nullable_val is False else ("NULL" if nullable_val is True else "—")
+                rows.append({
+                    "Column": cname,
+                    "Type": cinfo.get("type", "—"),
+                    "Nullable": nullable,
+                    "Description": cinfo.get("desc", ""),
+                })
+
+            df_cols = pd.DataFrame(rows, columns=["Column", "Type", "Nullable", "Description"])
+            st.caption(f"Showing {len(df_cols)} of {len(cols_dict)} columns")
+            st.dataframe(
+                df_cols,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Column": st.column_config.TextColumn("Column", width="medium"),
+                    "Type": st.column_config.TextColumn("Type", width="small"),
+                    "Nullable": st.column_config.TextColumn("Nullable", width="small"),
+                    "Description": st.column_config.TextColumn("Description", width="large"),
+                },
+            )
+            st.download_button(
+                "💾 Download columns (CSV)",
+                data=df_cols.to_csv(index=False),
+                file_name=f"{se_table}_columns.csv",
+                mime="text/csv",
+                key="se_dl_cols",
+            )
+        else:
+            st.info(
+                "No column-level detail is documented for this object — it is typically a "
+                "view; query the underlying base tables for full column detail."
+            )
+
+        # Indexes & relationships
+        extra_col1, extra_col2 = st.columns(2)
+        with extra_col1:
+            if tbl.get("indexes"):
+                with st.expander(f"🔑 Indexes ({len(tbl['indexes'])})", expanded=False):
+                    for iname, icols in tbl["indexes"].items():
+                        st.markdown(f"- **`{iname}`** → `{icols}`")
+        with extra_col2:
+            if tbl.get("foreign_keys"):
+                with st.expander(f"🔗 Foreign keys / joins ({len(tbl['foreign_keys'])})", expanded=False):
+                    for fk, fkcols in tbl["foreign_keys"].items():
+                        st.markdown(f"- `{fk}` on `{fkcols}`")
+
+        # Related join keys from the relationships map
+        related = {k: v for k, v in COMBINED_RELATIONSHIPS.items() if se_table in k}
+        if related:
+            with st.expander(f"🧭 Documented join keys involving this table ({len(related)})", expanded=False):
+                for rel, join in related.items():
+                    st.markdown(f"- **{rel}**  \n  `{join}`")
+
+
 # ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
@@ -1282,8 +1402,8 @@ with footer_col1:
     st.image("terillium_logo.png", width=60)
 with footer_col2:
     st.caption(
-        "Terillium - Oracle Fusion Cloud 26A | "
-        "41 tables | 30 example queries | 25 validation rules | "
-        "Powered by Claude API + ofjdbc"
+        f"Terillium - Oracle Fusion Cloud {SCHEMA_ORACLE_RELEASE} | "
+        f"{len(COMBINED_TABLES)} tables | 30 example queries | 25 validation rules | "
+        f"last updated {SCHEMA_LAST_UPDATED} | Powered by Claude API + ofjdbc"
     )
 
