@@ -11,6 +11,7 @@ import re
 import glob
 import json
 import zlib
+from functools import lru_cache
 from datetime import datetime, timezone
 from urllib.parse import unquote
 import streamlit as st
@@ -249,6 +250,15 @@ COMBINED_TABLES = {**ALL_TABLES, **ALL_OM_SHIP_FIN_TABLES, **ALL_ITEM_TABLES, **
 COMBINED_RELATIONSHIPS = {**RELATIONSHIPS, **OM_SHIP_FIN_RELATIONSHIPS, **ITEM_RELATIONSHIPS, **SUPPLIER_RELATIONSHIPS, **WORKFLOW_RELATIONSHIPS}
 COMBINED_LOOKUPS = {**LOOKUP_VALUES, **OM_SHIP_FIN_LOOKUP_VALUES, **ITEM_LOOKUP_VALUES, **SUPPLIER_LOOKUP_VALUES, **WORKFLOW_LOOKUP_VALUES}
 
+# Claude model choices for the sidebar selector. Sonnet 4.6 is the default —
+# best quality/cost balance for SQL generation over the large schema prompt.
+MODEL_OPTIONS = {
+    "Sonnet 4.6 — balanced (recommended)": "claude-sonnet-4-6",
+    "Haiku 4.5 — fastest & cheapest": "claude-haiku-4-5",
+    "Opus 4.8 — most capable": "claude-opus-4-8",
+}
+DEFAULT_MODEL = "claude-sonnet-4-6"
+
 # Module -> table-name-prefix map, shared by the sidebar Schema Browser and the
 # Schema Explorer tab. str.startswith() accepts a tuple, so str and tuple prefixes
 # are handled uniformly.
@@ -366,6 +376,19 @@ with st.sidebar:
         "Anthropic (Claude)", "ANTHROPIC_API_KEY", _validate_anthropic,
         "Set ANTHROPIC_API_KEY in .env (local) or Streamlit secrets (cloud), or enter here.",
     )
+
+    # Model selector — drives both the SQL generator and the Debug tab.
+    model_label = st.selectbox(
+        "Claude model",
+        options=list(MODEL_OPTIONS.keys()),
+        index=0,  # Sonnet 4.6 default
+        help=(
+            "Sonnet 4.6 is the best balance for SQL generation. Haiku is ~3x cheaper "
+            "for simple queries; Opus is most capable for tricky reports. The large "
+            "schema prompt is cached, so repeat calls in the same session are far cheaper."
+        ),
+    )
+    selected_model = MODEL_OPTIONS[model_label]
 
     # Optional extra providers — stored for future use.
     openai_key = _provider_key_ui(
@@ -506,8 +529,14 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Build the system prompt for Claude
 # ---------------------------------------------------------------------------
+@lru_cache(maxsize=1)
 def build_system_prompt():
-    """Assemble the full schema context for Claude."""
+    """Assemble the full schema context for Claude.
+
+    Memoized: the schema is static, so build the ~36k-token string once and reuse
+    the identical bytes on every call. Identical bytes keep the Anthropic prompt
+    cache prefix stable, so repeat calls read the cached prompt at ~10% of input cost.
+    """
     schema_text = """You are an expert Oracle Fusion Cloud SQL developer specializing in BI Publisher reports.
 You write SQL queries that run inside Oracle BI Publisher against the FUSION schema.
 You have deep knowledge of: Procurement (PO), Order Management (DOO), Shipping (WSH), Accounts Payable (AP), and Accounts Receivable (AR).
@@ -826,14 +855,22 @@ def parse_uploaded_file(uploaded_file):
 # ---------------------------------------------------------------------------
 # Claude API call
 # ---------------------------------------------------------------------------
-def generate_sql(user_prompt, api_key_val):
-    """Call Claude API to generate SQL from natural language."""
+def generate_sql(user_prompt, api_key_val, model=DEFAULT_MODEL):
+    """Call Claude API to generate SQL from natural language.
+
+    The large schema system prompt is sent as a cached block (cache_control:
+    ephemeral), so repeat calls within the 5-min TTL read it at ~10% of input cost.
+    """
     client = anthropic.Anthropic(api_key=api_key_val)
 
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=model,
         max_tokens=4096,
-        system=build_system_prompt(),
+        system=[{
+            "type": "text",
+            "text": build_system_prompt(),
+            "cache_control": {"type": "ephemeral"},
+        }],
         messages=[{"role": "user", "content": user_prompt}],
     )
     return message.content[0].text
@@ -842,13 +879,12 @@ def generate_sql(user_prompt, api_key_val):
 # ---------------------------------------------------------------------------
 # Debug assistant — diagnose failing SQL + persist debug history
 # ---------------------------------------------------------------------------
-DEBUG_MODEL = "claude-sonnet-4-20250514"
 DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_history.jsonl")
 
 
-def debug_sql(sql, error, context, api_key_val):
+def debug_sql(sql, error, context, api_key_val, model=DEFAULT_MODEL):
     """Call Claude to diagnose a failing BI Publisher SQL query and propose a fix.
-    Uses the full schema system prompt so column/table errors can be resolved."""
+    Uses the full schema system prompt (cached) so column/table errors can be resolved."""
     client = anthropic.Anthropic(api_key=api_key_val)
     user_msg = (
         "A BI Publisher SQL query failed against Oracle Fusion Cloud. Using the schema "
@@ -863,9 +899,13 @@ def debug_sql(sql, error, context, api_key_val):
         "3. **Notes** — anything else to watch for."
     )
     message = client.messages.create(
-        model=DEBUG_MODEL,
+        model=model,
         max_tokens=4096,
-        system=build_system_prompt(),
+        system=[{
+            "type": "text",
+            "text": build_system_prompt(),
+            "cache_control": {"type": "ephemeral"},
+        }],
         messages=[{"role": "user", "content": user_msg}],
     )
     return message.content[0].text
@@ -1077,7 +1117,7 @@ with tab1:
 
             with st.spinner("Claude is writing your SQL query..."):
                 try:
-                    result = generate_sql(full_prompt, api_key)
+                    result = generate_sql(full_prompt, api_key, selected_model)
                     st.session_state["last_result"] = result
                 except anthropic.AuthenticationError:
                     st.error("Invalid API key. Please check your Anthropic API key.")
@@ -1484,14 +1524,14 @@ with tab6:
         else:
             with st.spinner("Claude is debugging your query..."):
                 try:
-                    diagnosis = debug_sql(dbg_sql, dbg_error, dbg_module, api_key)
+                    diagnosis = debug_sql(dbg_sql, dbg_error, dbg_module, api_key, selected_model)
                     record = {
                         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         "module": dbg_module,
                         "sql": dbg_sql.strip(),
                         "error": dbg_error.strip(),
                         "diagnosis": diagnosis,
-                        "model": DEBUG_MODEL,
+                        "model": selected_model,
                     }
                     append_debug_record(record)
                     st.session_state["last_debug"] = record
