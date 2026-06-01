@@ -191,10 +191,13 @@ EGP_MFG_PART_NUMBERS = {
 
 EGP_FULL_CATEGORY_LIST = {
     "description": (
-        "Stores relationship between all catalogs and categories, "
-        "including shared category hierarchies. "
-        "Useful for navigating category trees across catalogs."
+        "TABLE (not a view) — stores relationship between all catalogs and categories, "
+        "including shared category hierarchies (up to 15 parent levels). "
+        "Useful for navigating category trees across catalogs. "
+        "A companion view EGP_FULL_CATEGORY_LIST_V also exists."
     ),
+    "object_type": "TABLE",
+    "primary_key": ["CATEGORY_SET_ID", "CATEGORY_ID", "LOAD_ID"],  # 26B-verified 2026-06-01 (LOAD_ID is part of the PK)
     "schema": "FUSION",
     "owner": "EGP",
 }
@@ -452,9 +455,12 @@ EGP_SYSTEM_ITEMS_B = {
         "LAST_UPDATE_LOGIN": {"type": "VARCHAR2(32)", "nullable": True, "desc": "Session login of last updater"},
         "REQUEST_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "ESS job request ID"},
 
-        # --- Trading Partner: NOT on EGP_SYSTEM_ITEMS_B. These live in EGP_TRADING_PARTNER_ITEMS;
-        #     join that table by INVENTORY_ITEM_ID. Referencing TRADING_PARTNER_ID/TP_TYPE/TP_ITEM_NUMBER
-        #     on EGP_SYSTEM_ITEMS_B raises ORA-00904. ---
+        # --- Trading Partner: CONFIRMED present on EGP_SYSTEM_ITEMS_B in 26B
+        #     (members of unique index EGP_SYSTEM_ITEMS_B_U3). Verified 2026-06-01 against
+        #     26b/oedsc/egpsystemitemsb-4735.html. EGP_TRADING_PARTNER_ITEMS also exists separately. ---
+        "TRADING_PARTNER_ID": {"type": "NUMBER(18)", "nullable": True, "desc": "Trading partner (supplier/customer/etc.) FK; part of index U3"},
+        "TP_TYPE": {"type": "VARCHAR2(30)", "nullable": True, "desc": "Trading partner type: CUSTOMER, MANUFACTURER, COMPETITOR, SUPPLIER"},
+        "TP_ITEM_NUMBER": {"type": "VARCHAR2(300)", "nullable": True, "desc": "Trading partner's item number; part of index U3"},
 
         # --- Misc ---
         "COMPLETENESS_SCORE": {"type": "NUMBER(3)", "nullable": True, "desc": "Item data completeness percentage"},
@@ -902,12 +908,21 @@ EGO_ITEM_ASSOCIATIONS = {
     ),
     "schema": "FUSION",
     "owner": "EGO",
+    # 26B-verified (2026-06-01, 25c/oedsc/egoitemassociations-5190): PK is the 7-column composite below,
+    # NOT ASSOCIATION_ID. ITEM_ASSOCIATION_ID does not exist; ASSOCIATION_ID is a non-key unique id.
+    "primary_key": [
+        "INVENTORY_ITEM_ID", "ORGANIZATION_ID", "ACD_TYPE",
+        "CHANGE_LINE_ID", "VERSION_ID", "SUPPLIER_ID", "SUPPLIER_SITE_ID",
+    ],
     "key_columns": {
-        "ASSOCIATION_ID": {"type": "NUMBER(18)", "desc": "Row PK (renamed from ITEM_ASSOCIATION_ID)"},
-        "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK"},
-        "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
-        "SUPPLIER_ID": {"type": "NUMBER(18)", "desc": "Supplier FK (replaces generic TRADING_PARTNER_ID; table is supplier-scoped)"},
-        "SUPPLIER_SITE_ID": {"type": "NUMBER(18)", "desc": "Supplier site FK"},
+        "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK (PK member)"},
+        "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK (PK member)"},
+        "ACD_TYPE": {"type": "VARCHAR2(30)", "desc": "Add/Change/Delete change type (PK member)"},
+        "CHANGE_LINE_ID": {"type": "NUMBER(18)", "desc": "Change order line FK (PK member)"},
+        "VERSION_ID": {"type": "NUMBER(18)", "desc": "Version FK -> EGO_VERSIONS_B (PK member)"},
+        "SUPPLIER_ID": {"type": "NUMBER(18)", "desc": "Supplier FK (PK member; replaces generic TRADING_PARTNER_ID)"},
+        "SUPPLIER_SITE_ID": {"type": "NUMBER(18)", "desc": "Supplier site FK (PK member)"},
+        "ASSOCIATION_ID": {"type": "NUMBER(18)", "desc": "Non-key surrogate unique id (NOT the PK; ITEM_ASSOCIATION_ID does not exist)"},
         "PRIMARY_FLAG": {"type": "VARCHAR2(1)", "desc": "Y/N - primary supplier association"},
         "VERSION_START_DATE": {"type": "DATE", "desc": "Effective start date (renamed from START_DATE)"},
         "VERSION_END_DATE": {"type": "DATE", "desc": "Effective end date (renamed from END_DATE)"},
@@ -1148,6 +1163,107 @@ JOIN EGP_SYSTEM_ITEMS_B rel_item
 
 
 # ============================================================================
+# ADDED 2026-06-01 — objects confirmed present in Oracle Fusion SCM 26B docs
+# (previously only referenced in join keys; existence verified, PKs noted where
+#  the per-table 26B/oedsc page could be read — see SCHEMA_AUDIT_ITEMS_26B_2026-06-01.md)
+# ============================================================================
+
+EGP_TRADING_PARTNER_ITEMS = {
+    "description": (
+        "Trading-partner item cross-references (customer / competitor / supplier / "
+        "manufacturer item numbers) linked to internal items. Note: TRADING_PARTNER_ID / "
+        "TP_TYPE / TP_ITEM_NUMBER ALSO exist directly on EGP_SYSTEM_ITEMS_B (index U3)."
+    ),
+    "schema": "FUSION",
+    "owner": "EGP",
+    # Exact 26B PK not machine-readable (deep-link redirected); columns below are the reliable join keys.
+    "key_columns": {
+        "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Internal item FK -> EGP_SYSTEM_ITEMS_B"},
+        "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
+        "TRADING_PARTNER_ID": {"type": "NUMBER(18)", "desc": "Trading partner FK"},
+        "TP_TYPE": {"type": "VARCHAR2(30)", "desc": "CUSTOMER / MANUFACTURER / COMPETITOR / SUPPLIER"},
+        "TP_ITEM_NUMBER": {"type": "VARCHAR2(300)", "desc": "Trading partner's item number"},
+    },
+}
+
+EGP_SYSTEM_ITEMS_VL = {
+    "description": (
+        "Pre-joined item master VIEW (base EGP_SYSTEM_ITEMS_B + translation EGP_SYSTEM_ITEMS_TL "
+        "+ EGP_ITEM_ORG_ASSOCIATIONS), filtered to the session language. "
+        "Recommended target for BI Publisher item queries over the raw _B/_TL tables."
+    ),
+    "object_type": "VIEW",
+    "schema": "FUSION",
+    "owner": "EGP",
+}
+
+EGP_SYSTEM_ITEMS_INTERFACE = {
+    "description": (
+        "Item import staging/interface table (Item Import / Product Hub batch loads). "
+        "Rows are processed into EGP_SYSTEM_ITEMS_B; not for transactional reporting."
+    ),
+    "schema": "FUSION",
+    "owner": "EGP",
+}
+
+EGP_ITEM_TEXT_TL = {
+    "description": (
+        "Item long-text / keyword index translation table (Oracle Text). "
+        "Join to item master on ITEM_ID + ORG_ID."
+    ),
+    "schema": "FUSION",
+    "owner": "EGP",
+    "primary_key": ["ITEM_ID", "ORG_ID", "LANGUAGE"],  # 26B-verified 2026-06-01
+    "key_columns": {
+        "ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK (= INVENTORY_ITEM_ID)"},
+        "ORG_ID": {"type": "NUMBER(18)", "desc": "Organization FK (= ORGANIZATION_ID)"},
+        "LANGUAGE": {"type": "VARCHAR2(4)", "desc": "Row language"},
+    },
+}
+
+EGO_VERSIONS_B = {
+    "description": (
+        "Generic object-version store used for item version control "
+        "(referenced by EGO_ITEM_ASSOCIATIONS.VERSION_ID and change management)."
+    ),
+    "schema": "FUSION",
+    "owner": "EGO",
+    "primary_key": ["VERSION_ID"],  # 26B-verified 2026-06-01
+    "key_columns": {
+        "VERSION_ID": {"type": "NUMBER(18)", "desc": "Version unique identifier (PK)"},
+    },
+}
+
+EGP_ITEM_CATEGORIES = {
+    "description": (
+        "VIEW (not a table) joining item-category assignments with category-set and "
+        "category detail (EGP_ITEM_CAT_ASSIGNMENTS + EGP_CATEGORY_SETS_B + "
+        "EGP_ITEM_ORG_ASSOCIATIONS + INV_ORG_PARAMETERS). No primary key."
+    ),
+    "object_type": "VIEW",
+    "schema": "FUSION",
+    "owner": "EGP",
+    # Logical uniqueness (not a declared PK):
+    "key_columns": {
+        "INVENTORY_ITEM_ID": {"type": "NUMBER(18)", "desc": "Item FK"},
+        "ORGANIZATION_ID": {"type": "NUMBER(18)", "desc": "Organization FK"},
+        "CATEGORY_SET_ID": {"type": "NUMBER(18)", "desc": "Category set / catalog FK"},
+        "CATEGORY_ID": {"type": "NUMBER(18)", "desc": "Category FK"},
+    },
+}
+
+EGP_CATG_MAP_HDRS_VL = {
+    "description": (
+        "Category-mapping header VIEW. Oracle publishes this as the _VL view; "
+        "the underlying EGP_CATG_MAP_HDRS_B base table has no standalone documented page."
+    ),
+    "object_type": "VIEW",
+    "schema": "FUSION",
+    "owner": "EGP",
+}
+
+
+# ============================================================================
 # ALL TABLES (for lookup by app.py) — includes tables with full "columns" defs
 # ============================================================================
 ALL_ITEM_TABLES = {
@@ -1164,6 +1280,16 @@ ALL_ITEM_TABLES = {
     "EGP_ITEM_REVISIONS_TL": EGP_ITEM_REVISIONS_TL,
     "EGP_ITEM_RELATIONSHIPS_B": EGP_ITEM_RELATIONSHIPS_B,
     "EGP_ITEM_CLASSES_B": EGP_ITEM_CLASSES_B,
+    # Added 2026-06-01 — confirmed present in 26B
+    "EGO_ITEM_ASSOCIATIONS": EGO_ITEM_ASSOCIATIONS,
+    "EGP_TRADING_PARTNER_ITEMS": EGP_TRADING_PARTNER_ITEMS,
+    "EGP_SYSTEM_ITEMS_VL": EGP_SYSTEM_ITEMS_VL,
+    "EGP_SYSTEM_ITEMS_INTERFACE": EGP_SYSTEM_ITEMS_INTERFACE,
+    "EGP_ITEM_TEXT_TL": EGP_ITEM_TEXT_TL,
+    "EGO_VERSIONS_B": EGO_VERSIONS_B,
+    "EGP_ITEM_CATEGORIES": EGP_ITEM_CATEGORIES,
+    "EGP_CATG_MAP_HDRS_VL": EGP_CATG_MAP_HDRS_VL,
+    "EGP_FULL_CATEGORY_LIST": EGP_FULL_CATEGORY_LIST,
 }
 
 # ============================================================================

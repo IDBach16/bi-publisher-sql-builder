@@ -4,6 +4,12 @@
 **Scope:** All 77 table/view definitions across `schema.py`, `schema_items_inventory.py`, `schema_om_ship_fin.py`, `schema_suppliers.py`, `schema_workflow.py`
 **Method:** One research agent per table compared the app's declared columns against Oracle's current *Tables and Views for Oracle Fusion Cloud* documentation (releases 25B–26B). 76/77 returned verdicts; `EGP_MFG_PART_NUMBERS` (the 4-column view) timed out and was not verified.
 
+> **⚠️ UPDATE 2026-06-01 — the Item tables were re-verified against Release 26B.** See **`SCHEMA_AUDIT_ITEMS_26B_2026-06-01.md`**. That pass **overturned** several findings below for the Items module:
+> - **`EGP_SYSTEM_ITEMS_B`** — the claim that `TRADING_PARTNER_ID`/`TP_TYPE`/`TP_ITEM_NUMBER` are *not* on the table is **WRONG**; they exist (index `U3`). Disregard the corresponding ORA-00904 warning.
+> - **`EGO_ITEM_ASSOCIATIONS`** — PK is a 7-column composite, **not** `ASSOCIATION_ID`; `ITEM_ASSOCIATION_ID` does not exist.
+> - **`EGP_FULL_CATEGORY_LIST`** is a TABLE (PK incl. `LOAD_ID`); **`EGP_ITEM_CATEGORIES`** is a VIEW; **`EGP_CATG_MAP_HDRS_B`** is published only as the `_VL` view.
+> Item findings that **held up** in 26B: `EGP_CATEGORIES_B`/`EGP_ITEM_REVISIONS_B` sizes, `EGP_ITEM_RELATIONSHIPS_B` renames, `EGP_ITEM_CLASSES_B` PK rename, `EGP_ITEM_ORG_ASSOCIATIONS` and `INV_ORGANIZATION_DEFINITIONS_V` missing columns.
+
 ---
 
 ## How to read this
