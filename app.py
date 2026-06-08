@@ -198,7 +198,11 @@ def parse_xdm_catalog(path):
 @st.cache_data(show_spinner=False)
 def load_catalog_library():
     app_dir = os.path.dirname(os.path.abspath(__file__))
-    return [parse_xdm_catalog(p) for p in sorted(glob.glob(os.path.join(app_dir, "*.xdm.catalog")))]
+    paths = sorted(glob.glob(os.path.join(app_dir, "*.xdm.catalog")))
+    # Skip superseded data models (e.g. *_obsolete*) so stale SQL never lands in
+    # the browse list or the RAG reference context fed to Claude.
+    paths = [p for p in paths if "_obsolete" not in os.path.basename(p).lower()]
+    return [parse_xdm_catalog(p) for p in paths]
 
 
 def build_catalog_context(catalogs, max_chars=30000):
@@ -254,7 +258,7 @@ COMBINED_LOOKUPS = {**LOOKUP_VALUES, **OM_SHIP_FIN_LOOKUP_VALUES, **ITEM_LOOKUP_
 # best quality/cost balance for SQL generation over the large schema prompt.
 MODEL_OPTIONS = {
     "Sonnet 4.6 — balanced (recommended)": "claude-sonnet-4-6",
-    "Haiku 4.5 — fastest & cheapest": "claude-haiku-4-5",
+    "Haiku 4.5 — fastest & cheapest": "claude-haiku-4-5-20251001",
     "Opus 4.8 — most capable": "claude-opus-4-8",
 }
 DEFAULT_MODEL = "claude-sonnet-4-6"
