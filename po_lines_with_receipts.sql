@@ -1,0 +1,204 @@
+-- ============================================================
+-- PO Lines with Receipts - BI Publisher Report
+-- Approved PO lines showing ordered vs received quantities.
+-- Optional parameters: PO number, BU, need-by date range, open-only.
+-- ============================================================
+WITH ReceiptSummary AS (
+    -- Aggregate receipt quantities per PO line location (DELIVER transactions)
+    SELECT
+        RT.PO_HEADER_ID,
+        RT.PO_LINE_ID,
+        RT.PO_LINE_LOCATION_ID,
+        SUM(RT.QUANTITY)                        AS TOTAL_QTY_RECEIVED,
+        MIN(RSH.RECEIPT_NUM)
+            KEEP (DENSE_RANK FIRST ORDER BY RT.TRANSACTION_DATE DESC)
+                                                AS LATEST_RECEIPT_NUM,
+        MAX(TRUNC(CAST(RT.TRANSACTION_DATE AS DATE)))
+                                                AS LAST_RECEIPT_DATE
+    FROM RCV_TRANSACTIONS       RT
+    JOIN RCV_SHIPMENT_HEADERS   RSH
+        ON RSH.SHIPMENT_HEADER_ID = RT.SHIPMENT_HEADER_ID
+    WHERE 1=1
+      AND RT.TRANSACTION_TYPE = 'DELIVER'
+    GROUP BY
+        RT.PO_HEADER_ID,
+        RT.PO_LINE_ID,
+        RT.PO_LINE_LOCATION_ID
+),
+ReceiptLineDetail AS (
+    -- One row per receipt shipment line tied to this PO line location
+    SELECT
+        RSL.PO_HEADER_ID,
+        RSL.PO_LINE_ID,
+        RSL.PO_LINE_LOCATION_ID,
+        RSH.RECEIPT_NUM,
+        RSL.SHIPMENT_HEADER_ID,
+        RSL.SHIPMENT_LINE_ID,
+        RSL.QUANTITY_RECEIVED,
+        RSL.QUANTITY_SHIPPED,
+        RSL.QUANTITY_RETURNED,
+        RSL.ITEM_DESCRIPTION                    AS RSL_ITEM_DESCRIPTION,
+        RSL.UOM_CODE                            AS RECEIPT_UOM_CODE,
+        RSL.SHIPMENT_UNIT_PRICE
+    FROM RCV_SHIPMENT_LINES     RSL
+    JOIN RCV_SHIPMENT_HEADERS   RSH
+        ON RSH.SHIPMENT_HEADER_ID = RSL.SHIPMENT_HEADER_ID
+    WHERE 1=1
+      AND RSL.PO_HEADER_ID IS NOT NULL
+)
+SELECT
+    -- PO Header
+    PHA.SEGMENT1                                AS PO_NUMBER,
+    PHA.DOCUMENT_STATUS                         AS PO_STATUS,
+    PHA.APPROVED_DATE,
+    TO_CHAR(PHA.APPROVED_DATE, 'MM/DD/YYYY')    AS APPROVED_DATE_DISPLAY,
+
+    -- Supplier
+    HP.PARTY_NAME                               AS SUPPLIER_NAME,
+    PS.SEGMENT1                                 AS SUPPLIER_NUMBER,
+    PSSA.VENDOR_SITE_CODE                       AS SUPPLIER_SITE,
+
+    -- Buyer
+    BuyerName.DISPLAY_NAME                      AS BUYER_NAME,
+
+    -- PO Line
+    PLA.LINE_NUM                                AS PO_LINE_NUMBER,
+    PLA.ITEM_DESCRIPTION                        AS LINE_DESCRIPTION,
+    ESI.ITEM_NUMBER                             AS ITEM_NUMBER,
+    PLA.VENDOR_PRODUCT_NUM                      AS SUPPLIER_ITEM_NUM,
+    NVL(UOM_VL.UNIT_OF_MEASURE, PLA.UOM_CODE)   AS UOM,
+
+    -- Shipment Schedule
+    PLLA.SHIPMENT_NUM,
+    TO_CHAR(PLLA.NEED_BY_DATE, 'MM/DD/YYYY')    AS NEED_BY_DATE,
+    TO_CHAR(PLLA.PROMISED_DATE, 'MM/DD/YYYY')   AS PROMISED_DATE,
+    ShipLoc.LOCATION_NAME                       AS SHIP_TO_LOCATION,
+
+    -- Quantities
+    NVL(PLLA.QUANTITY, 0)                       AS QTY_ORDERED,
+    NVL(PLLA.QUANTITY_RECEIVED, 0)              AS QTY_RECEIVED,
+    NVL(PLLA.QUANTITY_BILLED, 0)                AS QTY_BILLED,
+    NVL(PLLA.QUANTITY_CANCELLED, 0)             AS QTY_CANCELLED,
+    NVL(PLLA.QUANTITY, 0)
+        - NVL(PLLA.QUANTITY_RECEIVED, 0)
+        - NVL(PLLA.QUANTITY_CANCELLED, 0)       AS QTY_OPEN,
+    NVL(PLLA.QUANTITY_RECEIVED, 0)
+        - NVL(PLLA.QUANTITY_BILLED, 0)          AS QTY_RECEIVED_NOT_BILLED,
+
+    CASE
+        WHEN NVL(PLLA.QUANTITY, 0) > 0
+        THEN ROUND(NVL(PLLA.QUANTITY_RECEIVED, 0) / PLLA.QUANTITY * 100, 2)
+        ELSE NULL
+    END                                         AS PCT_RECEIVED,
+
+    -- Pricing
+    NVL(PLLA.PRICE_OVERRIDE, PLA.UNIT_PRICE)    AS UNIT_PRICE,
+    NVL(PLLA.QUANTITY, 0)
+        * NVL(PLLA.PRICE_OVERRIDE, NVL(PLA.UNIT_PRICE, 0))
+                                                AS LINE_AMOUNT,
+
+    -- Receipt detail (from shipment lines)
+    RLD.RECEIPT_NUM,
+    RLD.QUANTITY_RECEIVED                       AS RECEIPT_QTY_RECEIVED,
+    RLD.QUANTITY_SHIPPED                        AS RECEIPT_QTY_SHIPPED,
+    RLD.QUANTITY_RETURNED                       AS RECEIPT_QTY_RETURNED,
+    NVL(UOM_RECV.UNIT_OF_MEASURE, RLD.RECEIPT_UOM_CODE) AS RECEIPT_UOM,
+    RLD.SHIPMENT_UNIT_PRICE                     AS RECEIPT_UNIT_PRICE,
+
+    -- Receipt aggregate rollup from CTE
+    RS.LAST_RECEIPT_DATE,
+    TO_CHAR(RS.LAST_RECEIPT_DATE, 'MM/DD/YYYY') AS LAST_RECEIPT_DATE_DISPLAY,
+    RS.LATEST_RECEIPT_NUM,
+    NVL(RS.TOTAL_QTY_RECEIVED, 0)               AS TOTAL_QTY_RECEIVED_AGGR,
+
+    -- Schedule flags
+    NVL(PLLA.CANCEL_FLAG, 'N')                  AS SCHEDULE_CANCEL_FLAG,
+    PLLA.DESTINATION_TYPE_CODE,
+    PLLA.MATCH_OPTION,
+
+    -- Overdue indicator
+    CASE
+        WHEN PLLA.NEED_BY_DATE < TRUNC(SYSDATE)
+         AND NVL(PLLA.QUANTITY_RECEIVED, 0) < NVL(PLLA.QUANTITY, 0)
+         AND NVL(PLLA.CANCEL_FLAG, 'N') = 'N'
+        THEN 'Y'
+        ELSE 'N'
+    END                                         AS IS_OVERDUE,
+
+    -- Metadata
+    PHA.CURRENCY_CODE,
+    TO_CHAR(PHA.CREATION_DATE, 'MM/DD/YYYY')    AS PO_CREATION_DATE,
+    TO_CHAR(PHA.LAST_UPDATE_DATE, 'MM/DD/YYYY') AS PO_LAST_UPDATE_DATE,
+    PHA.PO_HEADER_ID,
+    PLA.PO_LINE_ID,
+    PLLA.LINE_LOCATION_ID
+
+FROM PO_HEADERS_ALL             PHA
+
+JOIN PO_LINES_ALL               PLA
+    ON  PLA.PO_HEADER_ID = PHA.PO_HEADER_ID
+    AND NVL(PLA.CANCEL_FLAG, 'N') = 'N'
+
+JOIN PO_LINE_LOCATIONS_ALL      PLLA
+    ON  PLLA.PO_LINE_ID = PLA.PO_LINE_ID
+    AND NVL(PLLA.CANCEL_FLAG, 'N') = 'N'
+    AND PLLA.SHIPMENT_TYPE NOT IN ('PRICE BREAK')
+
+LEFT JOIN POZ_SUPPLIERS         PS
+    ON  PS.VENDOR_ID = PHA.VENDOR_ID
+
+LEFT JOIN HZ_PARTIES            HP
+    ON  HP.PARTY_ID = PS.PARTY_ID
+
+LEFT JOIN POZ_SUPPLIER_SITES_ALL_M  PSSA
+    ON  PSSA.VENDOR_SITE_ID = PHA.VENDOR_SITE_ID
+
+LEFT JOIN PER_PERSON_NAMES_F_V  BuyerName
+    ON  BuyerName.PERSON_ID = PHA.AGENT_ID
+    AND BuyerName.NAME_TYPE = 'GLOBAL'
+    AND TRUNC(SYSDATE) BETWEEN BuyerName.EFFECTIVE_START_DATE
+                           AND BuyerName.EFFECTIVE_END_DATE
+
+LEFT JOIN EGP_SYSTEM_ITEMS_VL   ESI
+    ON  ESI.INVENTORY_ITEM_ID = PLA.ITEM_ID
+    AND ESI.ORGANIZATION_ID   = NVL(PLLA.SHIP_TO_ORGANIZATION_ID, ESI.ORGANIZATION_ID)
+
+LEFT JOIN INV_UNITS_OF_MEASURE_VL   UOM_VL
+    ON  UOM_VL.UOM_CODE = PLA.UOM_CODE
+
+LEFT JOIN INV_UNITS_OF_MEASURE_VL   UOM_RECV
+    ON  UOM_RECV.UOM_CODE = RLD.RECEIPT_UOM_CODE
+
+LEFT JOIN HR_LOCATIONS_ALL_F_VL ShipLoc
+    ON  ShipLoc.LOCATION_ID = PLLA.SHIP_TO_LOCATION_ID
+    AND TRUNC(SYSDATE) BETWEEN ShipLoc.EFFECTIVE_START_DATE
+                           AND ShipLoc.EFFECTIVE_END_DATE
+
+LEFT JOIN ReceiptSummary        RS
+    ON  RS.PO_HEADER_ID        = PHA.PO_HEADER_ID
+    AND RS.PO_LINE_ID          = PLA.PO_LINE_ID
+    AND RS.PO_LINE_LOCATION_ID = PLLA.LINE_LOCATION_ID
+
+LEFT JOIN ReceiptLineDetail     RLD
+    ON  RLD.PO_HEADER_ID        = PHA.PO_HEADER_ID
+    AND RLD.PO_LINE_ID          = PLA.PO_LINE_ID
+    AND RLD.PO_LINE_LOCATION_ID = PLLA.LINE_LOCATION_ID
+
+WHERE 1=1
+  AND PHA.DOCUMENT_STATUS       = 'APPROVED'
+  AND NVL(PHA.CANCEL_FLAG, 'N') = 'N'
+  AND PHA.SEGMENT1              IS NOT NULL
+  AND ( :P_PO_NUMBER    IS NULL OR PHA.SEGMENT1     = :P_PO_NUMBER )
+  AND ( :P_BU_ID        IS NULL OR PHA.PRC_BU_ID    = :P_BU_ID )
+  AND ( :P_NEED_BY_FROM IS NULL OR PLLA.NEED_BY_DATE >= :P_NEED_BY_FROM )
+  AND ( :P_NEED_BY_TO   IS NULL OR PLLA.NEED_BY_DATE <= :P_NEED_BY_TO )
+  AND ( :P_OPEN_ONLY IS NULL OR :P_OPEN_ONLY = 'N'
+        OR ( NVL(PLLA.QUANTITY, 0)
+               - NVL(PLLA.QUANTITY_RECEIVED, 0)
+               - NVL(PLLA.QUANTITY_CANCELLED, 0) > 0 ) )
+
+ORDER BY
+    PHA.SEGMENT1,
+    PLA.LINE_NUM,
+    PLLA.SHIPMENT_NUM,
+    RLD.RECEIPT_NUM
