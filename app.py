@@ -37,7 +37,8 @@ except Exception:
     OPENAI_AVAILABLE = False
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types as genai_types
     GEMINI_AVAILABLE = True
 except Exception:
     GEMINI_AVAILABLE = False
@@ -81,10 +82,10 @@ def _validate_openai(key):
 def _validate_gemini(key):
     """Lightweight auth check for a Google Gemini key."""
     if not GEMINI_AVAILABLE:
-        return False, "google-generativeai package not installed"
+        return False, "google-genai package not installed"
     try:
-        genai.configure(api_key=key)
-        list(genai.list_models())
+        client = genai.Client(api_key=key)
+        next(iter(client.models.list()), None)  # one page -> triggers auth
         return True, None
     except Exception as e:
         return False, str(e)
@@ -932,12 +933,15 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096):
 
     if provider == "gemini":
         if not GEMINI_AVAILABLE:
-            raise RuntimeError("google-generativeai package not installed. Run: pip install google-generativeai")
-        genai.configure(api_key=keys.get("gemini", ""))
-        gmodel = genai.GenerativeModel(model, system_instruction=system_prompt)
-        resp = gmodel.generate_content(
-            user_msg,
-            generation_config={"max_output_tokens": max_tokens},
+            raise RuntimeError("google-genai package not installed. Run: pip install google-genai")
+        client = genai.Client(api_key=keys.get("gemini", ""))
+        resp = client.models.generate_content(
+            model=model,
+            contents=user_msg,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=max_tokens,
+            ),
         )
         return resp.text
 
