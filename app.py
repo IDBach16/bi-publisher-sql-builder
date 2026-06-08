@@ -104,6 +104,7 @@ def _provider_key_ui(label, secret_name, validator, help_text):
         st.caption(f"{label}: loaded from secrets 🔒")
     else:
         key = st.text_input(f"{label} API Key", type="password", help=help_text)
+    key = (key or "").strip()  # trim stray whitespace/newlines from pasted keys
 
     # Auto-validate once whenever the key value changes -> popup confirmation.
     state_key = f"_validated_{secret_name}"
@@ -228,6 +229,57 @@ def build_catalog_context(catalogs, max_chars=30000):
             break
         parts.append(block_text)
         total += len(block_text)
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Debug history (RAG) — defined early so the sidebar can read it at import time.
+# ---------------------------------------------------------------------------
+DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_history.jsonl")
+
+
+def load_debug_history():
+    """Return all stored debug records (list of dicts), newest first. Tolerates bad lines."""
+    if not os.path.exists(DEBUG_LOG_PATH):
+        return []
+    records = []
+    with open(DEBUG_LOG_PATH, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return list(reversed(records))
+
+
+def build_debug_context(records, max_chars=8000):
+    """Compact 'lessons learned' RAG block built from past Debug-tab diagnoses, so
+    the generator proactively avoids errors it has already been shown how to fix.
+    Returns '' when there is no usable history."""
+    usable = [r for r in (records or []) if (r.get("diagnosis") or "").strip()]
+    if not usable:
+        return ""
+    parts = [
+        "## REFERENCE: Lessons from past debugging sessions in this workspace.",
+        "Each entry below is a real Oracle Fusion error and its root-cause fix. "
+        "Apply these proactively — do NOT repeat these mistakes when generating SQL.\n",
+    ]
+    total = sum(len(p) for p in parts)
+    for rec in usable:  # newest first (load_debug_history reverses)
+        module = rec.get("module") or "general"
+        err = (rec.get("error") or "").strip() or "(no error text)"
+        diag = (rec.get("diagnosis") or "").strip()
+        if len(diag) > 1400:
+            diag = diag[:1400] + "\n-- ... (truncated)"
+        block = f"### [{module}] {err[:200]}\n{diag}\n"
+        if total + len(block) > max_chars:
+            parts.append("\n-- (older debug lessons omitted to stay within context budget)")
+            break
+        parts.append(block)
+        total += len(block)
     return "\n".join(parts)
 from schema import (
     ALL_TABLES, RELATIONSHIPS, SUPPORTING_TABLES, VIEWS,
@@ -545,6 +597,20 @@ with st.sidebar:
         help="When enabled, SQL from your local .xdm.catalog files is injected into Claude's prompt as reference patterns.",
     )
     st.caption(f"{loaded} catalog(s) loaded" + (f", {failed} failed" if failed else ""))
+
+    # Debug-history RAG: feed past errors + their root-cause fixes back into the
+    # generator so it stops repeating mistakes. Populates as the Debug tab is used.
+    debug_records = load_debug_history()
+    use_debug_rag = st.checkbox(
+        "Use debug history (past fixes) as context",
+        value=True,
+        help="Injects root-cause fixes from your past Debug-tab sessions so the "
+             "generator avoids repeating those Oracle errors.",
+    )
+    st.caption(
+        f"{len(debug_records)} past fix(es) available"
+        if debug_records else "no debug history yet — use the 🐞 Debug tab to build it"
+    )
 
     st.divider()
     with st.expander("🔗 Table Relationships"):
@@ -954,11 +1020,10 @@ def generate_sql(user_prompt, provider, model, keys):
 
 
 # ---------------------------------------------------------------------------
-# Debug assistant — diagnose failing SQL + persist debug history
+# Debug assistant — diagnose failing SQL + persist debug history.
+# (DEBUG_LOG_PATH / load_debug_history / build_debug_context are defined earlier
+#  so the sidebar can read history at import time.)
 # ---------------------------------------------------------------------------
-DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_history.jsonl")
-
-
 def debug_sql(sql, error, context, provider, model, keys):
     """Diagnose a failing BI Publisher SQL query and propose a fix.
     Uses the full schema system prompt so column/table errors can be resolved."""
@@ -981,23 +1046,6 @@ def append_debug_record(record):
     """Append one debug record (dict) to the local JSONL history file."""
     with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
-def load_debug_history():
-    """Return all stored debug records (list of dicts), newest first. Tolerates bad lines."""
-    if not os.path.exists(DEBUG_LOG_PATH):
-        return []
-    records = []
-    with open(DEBUG_LOG_PATH, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return list(reversed(records))
 
 
 # ---------------------------------------------------------------------------
@@ -1166,6 +1214,10 @@ with tab1:
             full_prompt = ""
             if use_catalog_rag and catalogs:
                 full_prompt += build_catalog_context(catalogs) + "\n\n"
+            if use_debug_rag:
+                dbg_ctx = build_debug_context(debug_records)
+                if dbg_ctx:
+                    full_prompt += dbg_ctx + "\n\n"
             if file_summary:
                 full_prompt += (
                     "The user has attached an existing client report (Excel/CSV). "
