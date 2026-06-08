@@ -254,14 +254,41 @@ COMBINED_TABLES = {**ALL_TABLES, **ALL_OM_SHIP_FIN_TABLES, **ALL_ITEM_TABLES, **
 COMBINED_RELATIONSHIPS = {**RELATIONSHIPS, **OM_SHIP_FIN_RELATIONSHIPS, **ITEM_RELATIONSHIPS, **SUPPLIER_RELATIONSHIPS, **WORKFLOW_RELATIONSHIPS}
 COMBINED_LOOKUPS = {**LOOKUP_VALUES, **OM_SHIP_FIN_LOOKUP_VALUES, **ITEM_LOOKUP_VALUES, **SUPPLIER_LOOKUP_VALUES, **WORKFLOW_LOOKUP_VALUES}
 
-# Claude model choices for the sidebar selector. Sonnet 4.6 is the default —
-# best quality/cost balance for SQL generation over the large schema prompt.
-MODEL_OPTIONS = {
-    "Sonnet 4.6 — balanced (recommended)": "claude-sonnet-4-6",
-    "Haiku 4.5 — fastest & cheapest": "claude-haiku-4-5-20251001",
-    "Opus 4.8 — most capable": "claude-opus-4-8",
+# Model choices for the sidebar selector, across providers. Each label maps to
+# (provider, model_id). Claude Sonnet 4.6 is the default — best quality/cost
+# balance for SQL generation over the large schema prompt. OpenAI / Gemini
+# options only appear when their SDK is installed (see _available_models()).
+MODEL_REGISTRY = {
+    "Claude Sonnet 4.6 — balanced (recommended)": ("anthropic", "claude-sonnet-4-6"),
+    "Claude Haiku 4.5 — fastest & cheapest":       ("anthropic", "claude-haiku-4-5-20251001"),
+    "Claude Opus 4.8 — most capable":              ("anthropic", "claude-opus-4-8"),
+    "OpenAI GPT-4o — balanced":                    ("openai", "gpt-4o"),
+    "OpenAI GPT-4o mini — fast & cheap":           ("openai", "gpt-4o-mini"),
+    "Gemini 2.5 Pro — most capable":               ("gemini", "gemini-2.5-pro"),
+    "Gemini 2.5 Flash — fast & cheap":             ("gemini", "gemini-2.5-flash"),
 }
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL_LABEL = "Claude Sonnet 4.6 — balanced (recommended)"
+DEFAULT_MODEL = "claude-sonnet-4-6"  # back-compat default for the generation helpers
+
+# Human-readable provider names for error messages / key lookups.
+PROVIDER_LABELS = {
+    "anthropic": "Anthropic (Claude)",
+    "openai": "OpenAI",
+    "gemini": "Google Gemini",
+}
+
+
+def _available_models():
+    """Registry filtered to providers whose SDK is importable in this env.
+    Anthropic is always present; OpenAI/Gemini appear only when installed."""
+    out = {}
+    for label, (prov, mid) in MODEL_REGISTRY.items():
+        if prov == "openai" and not OPENAI_AVAILABLE:
+            continue
+        if prov == "gemini" and not GEMINI_AVAILABLE:
+            continue
+        out[label] = (prov, mid)
+    return out
 
 # Module -> table-name-prefix map, shared by the sidebar Schema Browser and the
 # Schema Explorer tab. str.startswith() accepts a tuple, so str and tuple prefixes
@@ -375,36 +402,44 @@ with st.sidebar:
 
     st.subheader("🔑 AI Provider Keys")
 
-    # Anthropic (Claude) is the key used to generate SQL.
+    # Each provider key can power generation. Enter any one (or load from
+    # secrets/env); the model dropdown below decides which one is actually used.
     api_key = _provider_key_ui(
         "Anthropic (Claude)", "ANTHROPIC_API_KEY", _validate_anthropic,
         "Set ANTHROPIC_API_KEY in .env (local) or Streamlit secrets (cloud), or enter here.",
     )
-
-    # Model selector — drives both the SQL generator and the Debug tab.
-    model_label = st.selectbox(
-        "Claude model",
-        options=list(MODEL_OPTIONS.keys()),
-        index=0,  # Sonnet 4.6 default
-        help=(
-            "Sonnet 4.6 is the best balance for SQL generation. Haiku is ~3x cheaper "
-            "for simple queries; Opus is most capable for tricky reports. The large "
-            "schema prompt is cached, so repeat calls in the same session are far cheaper."
-        ),
-    )
-    selected_model = MODEL_OPTIONS[model_label]
-
-    # Optional extra providers — stored for future use.
     openai_key = _provider_key_ui(
         "OpenAI", "OPENAI_API_KEY", _validate_openai,
-        "Optional. Set OPENAI_API_KEY in .env / Streamlit secrets, or enter here.",
+        "Set OPENAI_API_KEY in .env / Streamlit secrets, or enter here.",
     )
     gemini_key = _provider_key_ui(
         "Google Gemini", "GEMINI_API_KEY", _validate_gemini,
-        "Optional. Set GEMINI_API_KEY in .env / Streamlit secrets, or enter here.",
+        "Set GEMINI_API_KEY in .env / Streamlit secrets, or enter here.",
     )
+
+    # Keys bundle, keyed by provider, passed to the generation helpers.
+    keys = {"anthropic": api_key, "openai": openai_key, "gemini": gemini_key}
     st.session_state["openai_key"] = openai_key
     st.session_state["gemini_key"] = gemini_key
+
+    # Model selector — spans providers and drives both the generator and Debug
+    # tab. OpenAI/Gemini options only show when their SDK is installed.
+    model_choices = _available_models()
+    model_labels = list(model_choices.keys())
+    default_idx = model_labels.index(DEFAULT_MODEL_LABEL) if DEFAULT_MODEL_LABEL in model_labels else 0
+    model_label = st.selectbox(
+        "Model",
+        options=model_labels,
+        index=default_idx,
+        help=(
+            "Pick the provider + model to generate with. The selected provider's "
+            "API key (above) must be set. Claude Sonnet 4.6 is the best balance for "
+            "SQL generation; Claude prompts are cached so repeat calls are far cheaper."
+        ),
+    )
+    selected_provider, selected_model = model_choices[model_label]
+    if not keys.get(selected_provider):
+        st.caption(f"⚠️ Enter your {PROVIDER_LABELS[selected_provider]} key above to use this model.")
 
     st.divider()
     st.subheader("🔌 Fusion Connection (ofjdbc)")
@@ -859,25 +894,59 @@ def parse_uploaded_file(uploaded_file):
 # ---------------------------------------------------------------------------
 # Claude API call
 # ---------------------------------------------------------------------------
-def generate_sql(user_prompt, api_key_val, model=DEFAULT_MODEL):
-    """Call Claude API to generate SQL from natural language.
+def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096):
+    """Dispatch one chat completion to the selected provider and return its text.
 
-    The large schema system prompt is sent as a cached block (cache_control:
-    ephemeral), so repeat calls within the 5-min TTL read it at ~10% of input cost.
+    Anthropic sends the large schema prompt as a cached block (cache_control:
+    ephemeral) so repeat calls within the 5-min TTL read it at ~10% of input
+    cost. OpenAI caches long prompts automatically; Gemini takes a system
+    instruction. Raises with a clear message if the provider's SDK is missing.
     """
-    client = anthropic.Anthropic(api_key=api_key_val)
+    if provider == "anthropic":
+        client = anthropic.Anthropic(api_key=keys.get("anthropic", ""))
+        message = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=[{
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        return message.content[0].text
 
-    message = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=[{
-            "type": "text",
-            "text": build_system_prompt(),
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-    return message.content[0].text
+    if provider == "openai":
+        if not OPENAI_AVAILABLE:
+            raise RuntimeError("openai package not installed. Run: pip install openai")
+        client = OpenAI(api_key=keys.get("openai", ""))
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+        return resp.choices[0].message.content
+
+    if provider == "gemini":
+        if not GEMINI_AVAILABLE:
+            raise RuntimeError("google-generativeai package not installed. Run: pip install google-generativeai")
+        genai.configure(api_key=keys.get("gemini", ""))
+        gmodel = genai.GenerativeModel(model, system_instruction=system_prompt)
+        resp = gmodel.generate_content(
+            user_msg,
+            generation_config={"max_output_tokens": max_tokens},
+        )
+        return resp.text
+
+    raise ValueError(f"Unknown provider: {provider}")
+
+
+def generate_sql(user_prompt, provider, model, keys):
+    """Generate SQL from natural language using the selected provider/model."""
+    return _call_llm(provider, model, build_system_prompt(), user_prompt, keys)
 
 
 # ---------------------------------------------------------------------------
@@ -886,10 +955,9 @@ def generate_sql(user_prompt, api_key_val, model=DEFAULT_MODEL):
 DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_history.jsonl")
 
 
-def debug_sql(sql, error, context, api_key_val, model=DEFAULT_MODEL):
-    """Call Claude to diagnose a failing BI Publisher SQL query and propose a fix.
-    Uses the full schema system prompt (cached) so column/table errors can be resolved."""
-    client = anthropic.Anthropic(api_key=api_key_val)
+def debug_sql(sql, error, context, provider, model, keys):
+    """Diagnose a failing BI Publisher SQL query and propose a fix.
+    Uses the full schema system prompt so column/table errors can be resolved."""
     user_msg = (
         "A BI Publisher SQL query failed against Oracle Fusion Cloud. Using the schema "
         "reference above, diagnose the ROOT CAUSE and return a corrected query.\n\n"
@@ -902,17 +970,7 @@ def debug_sql(sql, error, context, api_key_val, model=DEFAULT_MODEL):
         "2. **Fix** — a corrected ```sql``` block.\n"
         "3. **Notes** — anything else to watch for."
     )
-    message = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=[{
-            "type": "text",
-            "text": build_system_prompt(),
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{"role": "user", "content": user_msg}],
-    )
-    return message.content[0].text
+    return _call_llm(provider, model, build_system_prompt(), user_msg, keys)
 
 
 def append_debug_record(record):
@@ -1095,8 +1153,8 @@ with tab1:
         generate_btn = st.button("🚀 Generate SQL", type="primary", width="stretch")
 
     if generate_btn:
-        if not api_key:
-            st.error("Please enter your Anthropic API key in the sidebar.")
+        if not keys.get(selected_provider):
+            st.error(f"Please enter your {PROVIDER_LABELS[selected_provider]} API key in the sidebar.")
         elif not user_input.strip() and not file_summary:
             st.warning("Please describe the report you need or attach a file.")
         else:
@@ -1119,12 +1177,12 @@ with tab1:
             elif file_summary:
                 full_prompt += "Generate the SQL to recreate this report from Oracle Fusion Cloud tables.\n"
 
-            with st.spinner("Claude is writing your SQL query..."):
+            with st.spinner(f"{PROVIDER_LABELS[selected_provider]} is writing your SQL query..."):
                 try:
-                    result = generate_sql(full_prompt, api_key, selected_model)
+                    result = generate_sql(full_prompt, selected_provider, selected_model, keys)
                     st.session_state["last_result"] = result
                 except anthropic.AuthenticationError:
-                    st.error("Invalid API key. Please check your Anthropic API key.")
+                    st.error("Invalid Anthropic API key. Please check it in the sidebar.")
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -1518,17 +1576,17 @@ with tab6:
         'Oracle error / symptom  (e.g. ORA-00904: "TP_TYPE": invalid identifier)',
         height=90, key="dbg_error",
     )
-    dbg_btn = st.button("🔍 Debug with Claude", type="primary", width="stretch")
+    dbg_btn = st.button("🔍 Debug SQL", type="primary", width="stretch")
 
     if dbg_btn:
-        if not api_key:
-            st.error("Please enter your Anthropic API key in the sidebar.")
+        if not keys.get(selected_provider):
+            st.error(f"Please enter your {PROVIDER_LABELS[selected_provider]} API key in the sidebar.")
         elif not dbg_sql.strip():
             st.warning("Paste the failing SQL first.")
         else:
-            with st.spinner("Claude is debugging your query..."):
+            with st.spinner(f"{PROVIDER_LABELS[selected_provider]} is debugging your query..."):
                 try:
-                    diagnosis = debug_sql(dbg_sql, dbg_error, dbg_module, api_key, selected_model)
+                    diagnosis = debug_sql(dbg_sql, dbg_error, dbg_module, selected_provider, selected_model, keys)
                     record = {
                         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         "module": dbg_module,
@@ -1540,7 +1598,7 @@ with tab6:
                     append_debug_record(record)
                     st.session_state["last_debug"] = record
                 except anthropic.AuthenticationError:
-                    st.error("Invalid API key. Please check your Anthropic API key.")
+                    st.error("Invalid Anthropic API key. Please check it in the sidebar.")
                 except Exception as e:
                     st.error(f"Error: {e}")
 
