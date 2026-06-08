@@ -1109,6 +1109,54 @@ def run_fusion_query(sql, host, username, password, report_path, max_rows=100):
             connection.close()
 
 
+def detect_bind_parameters(sql):
+    """Classify each :bind parameter so the user can verify the matching Data Type
+    in the BI Publisher Data Model before running the query.
+
+    Primary signal is the COLUMN the parameter is compared against (col = :param,
+    :param >= col, col BETWEEN :p1 AND :p2); the parameter name is only a fallback
+    when no comparison column is found. This is a hint to check, NOT a guarantee —
+    the user must confirm each type against the real column. A Date parameter
+    mistakenly defined as Integer/Number is the most common ORA-00932 cause.
+    String literals are stripped first so date-format masks like 'HH24:MI:SS'
+    aren't mistaken for binds. Returns an ordered list of (name, suggested_type).
+    """
+    text = re.sub(r"'[^']*'", "", sql)          # drop string literals (and their colons)
+    OPS = r"(?:>=|<=|<>|!=|=|>|<)"
+    COL = r"([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)?)"
+    PARAM = r":([A-Za-z][A-Za-z0-9_]*)"
+
+    # Map each parameter to the column it is compared against.
+    param_col = {}
+    for m in re.finditer(COL + r"\s*" + OPS + r"\s*" + PARAM, text):
+        param_col.setdefault(m.group(2), m.group(1))
+    for m in re.finditer(PARAM + r"\s*" + OPS + r"\s*" + COL, text):
+        param_col.setdefault(m.group(1), m.group(2))
+    for m in re.finditer(COL + r"\s+BETWEEN\s+" + PARAM + r"\s+AND\s+" + PARAM,
+                         text, re.IGNORECASE):
+        param_col.setdefault(m.group(2), m.group(1))
+        param_col.setdefault(m.group(3), m.group(1))
+
+    def classify(token):
+        u = token.upper().rsplit(".", 1)[-1]
+        if "DATE" in u or u.endswith(("_DT", "_FROM", "_TO")):
+            return "Date"
+        if u.endswith("_ID") or any(
+            t in u for t in ("AMOUNT", "QTY", "QUANTITY", "_COUNT")
+        ):
+            return "Integer / Number"
+        return "String"
+
+    results = {}
+    for m in re.finditer(PARAM, text):
+        name = m.group(1)
+        if name in results:
+            continue
+        # Prefer the compared column; fall back to the parameter name.
+        results[name] = classify(param_col.get(name, name))
+    return list(results.items())
+
+
 # ---------------------------------------------------------------------------
 # Main UI
 # ---------------------------------------------------------------------------
@@ -1255,6 +1303,29 @@ with tab1:
         sql_end = result_text.find("```", sql_start + 6) if sql_start != -1 else -1
         if sql_start != -1 and sql_end != -1:
             clean_sql = result_text[sql_start + 6:sql_end].strip()
+
+            # Remind the user to verify BI Publisher parameter data types — a Date
+            # parameter defined as Integer/Number is the usual ORA-00932 cause.
+            bind_params = detect_bind_parameters(clean_sql)
+            if bind_params:
+                has_date = any(ptype == "Date" for _, ptype in bind_params)
+                param_lines = "\n".join(
+                    f"- `:{name}` → suggested **{ptype}**" for name, ptype in bind_params
+                )
+                st.warning(
+                    "**⚠️ Verify each parameter's Data Type before running this query.**\n\n"
+                    "In the BI Publisher **Data Model → Parameters**, every bind variable's "
+                    "**Data Type** must match the column it is compared against. A mismatch "
+                    "raises `ORA-00932: inconsistent datatypes`.\n\n"
+                    f"{param_lines}\n\n"
+                    + (
+                        "🗓️ **Date parameters** must have Data Type **Date** (not Integer/Number), "
+                        "and the SQL must compare the bind directly — never wrap it in "
+                        "`TRUNC()` / `CAST()`.\n\n"
+                        if has_date else ""
+                    )
+                    + "_Suggested types are inferred from names/usage — confirm each against your schema._"
+                )
 
             btn_col1, btn_col2 = st.columns([1, 1])
             with btn_col1:
