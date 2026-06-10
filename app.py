@@ -315,6 +315,7 @@ MODEL_REGISTRY = {
     "Claude Sonnet 4.6 — balanced (recommended)": ("anthropic", "claude-sonnet-4-6"),
     "Claude Haiku 4.5 — fastest & cheapest":       ("anthropic", "claude-haiku-4-5-20251001"),
     "Claude Opus 4.8 — most capable":              ("anthropic", "claude-opus-4-8"),
+    "Claude Fable 5 — most powerful (premium)":    ("anthropic", "claude-fable-5"),
     "OpenAI GPT-4o — balanced":                    ("openai", "gpt-4o"),
     "OpenAI GPT-4o mini — fast & cheap":           ("openai", "gpt-4o-mini"),
     "Gemini 2.5 Pro — most capable":               ("gemini", "gemini-2.5-pro"),
