@@ -11,6 +11,7 @@ import re
 import glob
 import json
 import zlib
+import base64
 from functools import lru_cache
 from datetime import datetime, timezone
 from urllib.parse import unquote
@@ -963,16 +964,34 @@ def parse_uploaded_file(uploaded_file):
 # ---------------------------------------------------------------------------
 # Claude API call
 # ---------------------------------------------------------------------------
-def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096):
+def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, images=None):
     """Dispatch one chat completion to the selected provider and return its text.
 
     Anthropic sends the large schema prompt as a cached block (cache_control:
     ephemeral) so repeat calls within the 5-min TTL read it at ~10% of input
     cost. OpenAI caches long prompts automatically; Gemini takes a system
     instruction. Raises with a clear message if the provider's SDK is missing.
+
+    images: optional list of (media_type, raw_bytes) tuples — screenshots the
+    model should analyze alongside the text prompt (all three providers
+    support vision on the models in MODEL_REGISTRY).
     """
     if provider == "anthropic":
         client = anthropic.Anthropic(api_key=keys.get("anthropic", ""))
+        if images:
+            content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": base64.standard_b64encode(raw).decode("utf-8"),
+                    },
+                }
+                for media_type, raw in images
+            ] + [{"type": "text", "text": user_msg}]
+        else:
+            content = user_msg
         message = client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -981,20 +1000,30 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096):
                 "text": system_prompt,
                 "cache_control": {"type": "ephemeral"},
             }],
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": content}],
         )
-        return message.content[0].text
+        return next(block.text for block in message.content if block.type == "text")
 
     if provider == "openai":
         if not OPENAI_AVAILABLE:
             raise RuntimeError("openai package not installed. Run: pip install openai")
         client = OpenAI(api_key=keys.get("openai", ""))
+        if images:
+            content = [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{base64.standard_b64encode(raw).decode('utf-8')}"},
+                }
+                for media_type, raw in images
+            ] + [{"type": "text", "text": user_msg}]
+        else:
+            content = user_msg
         resp = client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg},
+                {"role": "user", "content": content},
             ],
         )
         return resp.choices[0].message.content
@@ -1003,9 +1032,16 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096):
         if not GEMINI_AVAILABLE:
             raise RuntimeError("google-genai package not installed. Run: pip install google-genai")
         client = genai.Client(api_key=keys.get("gemini", ""))
+        if images:
+            contents = [
+                genai_types.Part.from_bytes(data=raw, mime_type=media_type)
+                for media_type, raw in images
+            ] + [user_msg]
+        else:
+            contents = user_msg
         resp = client.models.generate_content(
             model=model,
-            contents=user_msg,
+            contents=contents,
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 max_output_tokens=max_tokens,
@@ -1016,9 +1052,9 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096):
     raise ValueError(f"Unknown provider: {provider}")
 
 
-def generate_sql(user_prompt, provider, model, keys):
+def generate_sql(user_prompt, provider, model, keys, images=None):
     """Generate SQL from natural language using the selected provider/model."""
-    return _call_llm(provider, model, build_system_prompt(), user_prompt, keys)
+    return _call_llm(provider, model, build_system_prompt(), user_prompt, keys, images=images)
 
 
 # ---------------------------------------------------------------------------
@@ -1250,6 +1286,34 @@ with tab1:
             st.error(file_summary)
             file_summary = None
 
+    # Screenshot upload — the model analyzes the image(s) to reverse-engineer the SQL
+    st.markdown("**Attach screenshots to analyze**")
+    uploaded_images = st.file_uploader(
+        "Upload screenshots (PNG/JPG)",
+        type=["png", "jpg", "jpeg", "gif", "webp"],
+        accept_multiple_files=True,
+        help="Upload screenshots of an existing report, a BI Publisher layout, or a Fusion screen. "
+             "The AI reads the visible columns, headers, and sample values and generates SQL that reproduces them.",
+    )
+
+    IMAGE_MIME_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                        "gif": "image/gif", "webp": "image/webp"}
+    MAX_IMAGE_BYTES = 5 * 1024 * 1024  # provider per-image limit (Anthropic: 5 MB)
+
+    screenshot_images = []
+    if uploaded_images:
+        preview_cols = st.columns(min(len(uploaded_images), 3))
+        for i, img_file in enumerate(uploaded_images):
+            raw = img_file.getvalue()
+            if len(raw) > MAX_IMAGE_BYTES:
+                st.warning(f"**{img_file.name}** is {len(raw) / (1024 * 1024):.1f} MB — over the 5 MB "
+                           "per-image limit, so it will be skipped. Crop or compress it and re-upload.")
+                continue
+            ext = img_file.name.rsplit(".", 1)[-1].lower()
+            screenshot_images.append((IMAGE_MIME_TYPES.get(ext, "image/png"), raw))
+            with preview_cols[i % len(preview_cols)]:
+                st.image(raw, caption=img_file.name, width="stretch")
+
     col1, col2 = st.columns([1, 4])
     with col1:
         generate_btn = st.button("🚀 Generate SQL", type="primary", width="stretch")
@@ -1257,8 +1321,8 @@ with tab1:
     if generate_btn:
         if not keys.get(selected_provider):
             st.error(f"Please enter your {PROVIDER_LABELS[selected_provider]} API key in the sidebar.")
-        elif not user_input.strip() and not file_summary:
-            st.warning("Please describe the report you need or attach a file.")
+        elif not user_input.strip() and not file_summary and not screenshot_images:
+            st.warning("Please describe the report you need, attach a file, or add a screenshot.")
         else:
             # Build the full prompt
             full_prompt = ""
@@ -1278,14 +1342,24 @@ with tab1:
                     "that cannot be mapped.\n\n"
                     f"{file_summary}\n\n"
                 )
+            if screenshot_images:
+                full_prompt += (
+                    "The user has attached screenshot(s) of an existing report, BI Publisher layout, "
+                    "or Oracle Fusion screen. Analyze the visible column headers, field labels, totals, "
+                    "and sample values in the image(s) to determine which Oracle Fusion Cloud tables and "
+                    "columns can produce this report. Generate a BI Publisher SQL query that recreates it. "
+                    "Map each visible column to the appropriate Fusion table.column, and note any columns "
+                    "that cannot be mapped.\n\n"
+                )
             if user_input.strip():
                 full_prompt += f"Additional instructions: {user_input.strip()}\n"
-            elif file_summary:
+            elif file_summary or screenshot_images:
                 full_prompt += "Generate the SQL to recreate this report from Oracle Fusion Cloud tables.\n"
 
             with st.spinner(f"{PROVIDER_LABELS[selected_provider]} is writing your SQL query..."):
                 try:
-                    result = generate_sql(full_prompt, selected_provider, selected_model, keys)
+                    result = generate_sql(full_prompt, selected_provider, selected_model, keys,
+                                          images=screenshot_images or None)
                     st.session_state["last_result"] = result
                 except anthropic.AuthenticationError:
                     st.error("Invalid Anthropic API key. Please check it in the sidebar.")
