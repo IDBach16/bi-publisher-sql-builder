@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; font-family: "Source Sans Pro", sans-serif; }
+  #zone {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 64px;
+    border: 1px dashed #4a5fc4;
+    border-radius: 8px;
+    background: #161b22;
+    color: #c9d1d9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    outline: none;
+    user-select: none;
+    padding: 10px 14px;
+    text-align: center;
+  }
+  #zone:focus { border-color: #7a8de0; background: #1b2230; }
+  #zone.ok { border-color: #56d364; color: #56d364; }
+</style>
+</head>
+<body>
+<div id="zone" tabindex="0">📋 Click here, then press <b>&nbsp;Ctrl+V&nbsp;</b> to paste a screenshot</div>
+<script>
+  function sendMessage(type, data) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+  }
+  function setValue(value) {
+    sendMessage("streamlit:setComponentValue", { dataType: "json", value: value });
+  }
+
+  sendMessage("streamlit:componentReady", { apiVersion: 1 });
+  sendMessage("streamlit:setFrameHeight", { height: 84 });
+
+  var zone = document.getElementById("zone");
+  var defaultHtml = zone.innerHTML;
+
+  function handlePaste(e) {
+    var items = (e.clipboardData || {}).items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf("image") === 0) {
+        var file = items[i].getAsFile();
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          // Send the data URL plus a nonce so pasting the same image after a
+          // clear still produces a fresh component value.
+          setValue({ dataUrl: ev.target.result, ts: Date.now() });
+          zone.classList.add("ok");
+          zone.innerHTML = "✓ Screenshot pasted — preview below. Paste again to add another.";
+          setTimeout(function () { zone.classList.remove("ok"); zone.innerHTML = defaultHtml; }, 4000);
+        };
+        reader.readAsDataURL(file);
+        e.preventDefault();
+        return;
+      }
+    }
+    zone.innerHTML = "⚠️ No image on the clipboard — snip a screenshot first (Win+Shift+S), then Ctrl+V here.";
+    setTimeout(function () { zone.innerHTML = defaultHtml; }, 4000);
+  }
+
+  zone.addEventListener("paste", handlePaste);
+  document.addEventListener("paste", handlePaste);
+  zone.addEventListener("click", function () { zone.focus(); });
+</script>
+</body>
+</html>

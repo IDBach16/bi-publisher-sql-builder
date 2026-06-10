@@ -12,6 +12,7 @@ import glob
 import json
 import zlib
 import base64
+import hashlib
 from functools import lru_cache
 from datetime import datetime, timezone
 from urllib.parse import unquote
@@ -43,6 +44,16 @@ try:
     GEMINI_AVAILABLE = True
 except Exception:
     GEMINI_AVAILABLE = False
+
+# Clipboard paste for screenshots — Streamlit's built-in widgets can't read
+# the clipboard. This local component listens for a real Ctrl+V paste event,
+# which browsers allow without any clipboard permission (unlike
+# navigator.clipboard.read(), which prompts and is blocked in Firefox).
+import streamlit.components.v1 as _components
+_paste_zone = _components.declare_component(
+    "paste_zone",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "paste_zone"),
+)
 
 
 def _get_secret(key, default=""):
@@ -1346,11 +1357,43 @@ with tab1:
             else:
                 st.error(summary)
 
-    if _image_files:
-        preview_cols = st.columns(min(len(_image_files), 3))
-        for i, img_file in enumerate(_image_files):
+    # Clipboard paste — snip a screenshot (Win+Shift+S), click the zone, press
+    # Ctrl+V. Works via the paste event, so no browser clipboard permission is
+    # needed. Pasted images persist in session state, deduped by content hash.
+    pasted = st.session_state.setdefault("pasted_screenshots", {})
+    cleared = st.session_state.setdefault("cleared_paste_digests", set())
+    paste_value = _paste_zone(key="paste_zone", default=None)
+    if paste_value and isinstance(paste_value, dict) and paste_value.get("dataUrl"):
+        try:
+            header, b64 = paste_value["dataUrl"].split(",", 1)
+            raw = base64.b64decode(b64)
+            mime = header.split(":", 1)[1].split(";", 1)[0] if header.startswith("data:") else "image/png"
+            digest = hashlib.md5(raw).hexdigest()
+            if digest not in pasted and digest not in cleared:
+                if len(raw) > MAX_IMAGE_BYTES:
+                    st.warning("Pasted image is over the 5 MB per-image limit and was skipped. "
+                               "Crop it smaller and paste again.")
+                else:
+                    pasted[digest] = (mime, raw)
+        except Exception:
+            st.warning("Couldn't read the pasted image — snip it again and re-paste.")
+    if pasted and st.button("🗑️ Clear pasted screenshots"):
+        # Remember cleared digests: the paste component re-reports its last
+        # value on every rerun, and this stops it re-adding them.
+        cleared.update(pasted.keys())
+        pasted.clear()
+        st.rerun()
+
+    _previews = [(up.name, up.getvalue()) for up in _image_files]
+    for i, (mime, raw) in enumerate(st.session_state.get("pasted_screenshots", {}).values(), 1):
+        screenshot_images.append((mime, raw))
+        _previews.append((f"pasted screenshot {i}", raw))
+
+    if _previews:
+        preview_cols = st.columns(min(len(_previews), 3))
+        for i, (name, raw) in enumerate(_previews):
             with preview_cols[i % len(preview_cols)]:
-                st.image(img_file.getvalue(), caption=img_file.name, width="stretch")
+                st.image(raw, caption=name, width="stretch")
 
     file_summary = "\n\n".join(file_summaries) if file_summaries else None
 
