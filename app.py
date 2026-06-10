@@ -102,7 +102,7 @@ def _provider_key_ui(label, secret_name, validator, help_text):
     loaded = _get_secret(secret_name, "")
     if loaded:
         key = loaded
-        st.caption(f"{label}: loaded from secrets 🔒")
+        st.caption(f":green[✓] {label}: key loaded from environment 🔒")
     else:
         key = st.text_input(f"{label} API Key", type="password", help=help_text)
     key = (key or "").strip()  # trim stray whitespace/newlines from pasted keys
@@ -407,9 +407,9 @@ st.markdown("""
         font-weight: 600;
         color: #c9d1d9;
     }
-    /* Code block styling */
+    /* Code block styling — accent matches the Terillium navy theme */
     .stCodeBlock {
-        border-left: 3px solid #0066cc;
+        border-left: 3px solid #4a5fc4;
     }
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
@@ -452,33 +452,10 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.image("terillium_logo.png", width=180)
-    st.markdown("---")
     st.title("Settings")
 
-    st.subheader("🔑 AI Provider Keys")
-
-    # Each provider key can power generation. Enter any one (or load from
-    # secrets/env); the model dropdown below decides which one is actually used.
-    api_key = _provider_key_ui(
-        "Anthropic (Claude)", "ANTHROPIC_API_KEY", _validate_anthropic,
-        "Set ANTHROPIC_API_KEY in .env (local) or Streamlit secrets (cloud), or enter here.",
-    )
-    openai_key = _provider_key_ui(
-        "OpenAI", "OPENAI_API_KEY", _validate_openai,
-        "Set OPENAI_API_KEY in .env / Streamlit secrets, or enter here.",
-    )
-    gemini_key = _provider_key_ui(
-        "Google Gemini", "GEMINI_API_KEY", _validate_gemini,
-        "Set GEMINI_API_KEY in .env / Streamlit secrets, or enter here.",
-    )
-
-    # Keys bundle, keyed by provider, passed to the generation helpers.
-    keys = {"anthropic": api_key, "openai": openai_key, "gemini": gemini_key}
-    st.session_state["openai_key"] = openai_key
-    st.session_state["gemini_key"] = gemini_key
-
-    # Model selector — spans providers and drives both the generator and Debug
-    # tab. OpenAI/Gemini options only show when their SDK is installed.
+    # Model selector — the one control every user touches, so it stays at the
+    # top level. Everything else lives in collapsed expanders below.
     model_choices = _available_models()
     model_labels = list(model_choices.keys())
     default_idx = model_labels.index(DEFAULT_MODEL_LABEL) if DEFAULT_MODEL_LABEL in model_labels else 0
@@ -488,150 +465,103 @@ with st.sidebar:
         index=default_idx,
         help=(
             "Pick the provider + model to generate with. The selected provider's "
-            "API key (above) must be set. Claude Sonnet 4.6 is the best balance for "
+            "API key (below) must be set. Claude Sonnet 4.6 is the best balance for "
             "SQL generation; Claude prompts are cached so repeat calls are far cheaper."
         ),
     )
     selected_provider, selected_model = model_choices[model_label]
+
+    with st.expander("🔑 AI Provider Keys", expanded=False):
+        # Each provider key can power generation. Enter any one (or load from
+        # secrets/env); the model dropdown above decides which one is actually used.
+        api_key = _provider_key_ui(
+            "Anthropic (Claude)", "ANTHROPIC_API_KEY", _validate_anthropic,
+            "Set ANTHROPIC_API_KEY in .env (local) or Streamlit secrets (cloud), or enter here.",
+        )
+        openai_key = _provider_key_ui(
+            "OpenAI", "OPENAI_API_KEY", _validate_openai,
+            "Set OPENAI_API_KEY in .env / Streamlit secrets, or enter here.",
+        )
+        gemini_key = _provider_key_ui(
+            "Google Gemini", "GEMINI_API_KEY", _validate_gemini,
+            "Set GEMINI_API_KEY in .env / Streamlit secrets, or enter here.",
+        )
+
+    # Keys bundle, keyed by provider, passed to the generation helpers.
+    keys = {"anthropic": api_key, "openai": openai_key, "gemini": gemini_key}
+    st.session_state["openai_key"] = openai_key
+    st.session_state["gemini_key"] = gemini_key
+
     if not keys.get(selected_provider):
-        st.caption(f"⚠️ Enter your {PROVIDER_LABELS[selected_provider]} key above to use this model.")
+        st.caption(f"⚠️ Enter your {PROVIDER_LABELS[selected_provider]} key in **AI Provider Keys** to use this model.")
 
-    st.divider()
-    st.subheader("🔌 Fusion Connection (ofjdbc)")
-    if not JDBC_AVAILABLE:
-        st.info("Live Fusion testing is disabled in this environment "
-                "(no JVM available). SQL generation still works.")
+    with st.expander("🔌 Fusion Connection (ofjdbc)", expanded=False):
+        if not JDBC_AVAILABLE:
+            st.info("Live Fusion testing is disabled in this environment "
+                    "(no JVM available). SQL generation still works.")
 
-    fusion_host = st.text_input(
-        "Fusion Host",
-        value=_get_secret("FUSION_HOST", ""),
-        placeholder="your-server.oraclecloud.com",
-        help="e.g. ecog-test.fa.ocs.oraclecloud.com",
-        disabled=not JDBC_AVAILABLE,
-    )
-    fusion_user = st.text_input(
-        "Fusion Username",
-        value=_get_secret("FUSION_USERNAME", ""),
-        disabled=not JDBC_AVAILABLE,
-    )
-    fusion_pass = st.text_input(
-        "Fusion Password",
-        type="password",
-        value=_get_secret("FUSION_PASSWORD", ""),
-        disabled=not JDBC_AVAILABLE,
-    )
-    fusion_report_path = st.text_input(
-        "Report Path",
-        value=_get_secret("FUSION_REPORT_PATH", "/~scm_impl/Ian_TEST/RP_ARB.xdo"),
-        help="Path where you deployed the ofjdbc catalog files in BI Publisher.",
-        disabled=not JDBC_AVAILABLE,
-    )
+        fusion_host = st.text_input(
+            "Fusion Host",
+            value=_get_secret("FUSION_HOST", ""),
+            placeholder="your-server.oraclecloud.com",
+            help="e.g. ecog-test.fa.ocs.oraclecloud.com",
+            disabled=not JDBC_AVAILABLE,
+        )
+        fusion_user = st.text_input(
+            "Fusion Username",
+            value=_get_secret("FUSION_USERNAME", ""),
+            disabled=not JDBC_AVAILABLE,
+        )
+        fusion_pass = st.text_input(
+            "Fusion Password",
+            type="password",
+            value=_get_secret("FUSION_PASSWORD", ""),
+            disabled=not JDBC_AVAILABLE,
+        )
+        fusion_report_path = st.text_input(
+            "Report Path",
+            value=_get_secret("FUSION_REPORT_PATH", "/~scm_impl/Ian_TEST/RP_ARB.xdo"),
+            help="Path where you deployed the ofjdbc catalog files in BI Publisher.",
+            disabled=not JDBC_AVAILABLE,
+        )
 
-    # Store connection info in session state
-    if JDBC_AVAILABLE and fusion_host and fusion_user and fusion_pass:
-        st.session_state["fusion_connected"] = True
-        st.session_state["fusion_host"] = fusion_host
-        st.session_state["fusion_user"] = fusion_user
-        st.session_state["fusion_pass"] = fusion_pass
-        st.session_state["fusion_report_path"] = fusion_report_path
-        st.success("Fusion credentials set")
-    else:
-        st.session_state["fusion_connected"] = False
-        if JDBC_AVAILABLE:
-            st.caption("Enter Fusion credentials to enable live query testing.")
+        # Store connection info in session state
+        if JDBC_AVAILABLE and fusion_host and fusion_user and fusion_pass:
+            st.session_state["fusion_connected"] = True
+            st.session_state["fusion_host"] = fusion_host
+            st.session_state["fusion_user"] = fusion_user
+            st.session_state["fusion_pass"] = fusion_pass
+            st.session_state["fusion_report_path"] = fusion_report_path
+            st.success("Fusion credentials set")
+        else:
+            st.session_state["fusion_connected"] = False
+            if JDBC_AVAILABLE:
+                st.caption("Enter Fusion credentials to enable live query testing.")
 
-    st.divider()
-    st.subheader("📋 Schema Browser")
+    with st.expander("🧠 Generation Context (RAG)", expanded=False):
+        catalogs = load_catalog_library()
+        loaded = sum(1 for c in catalogs if not c.get("error"))
+        failed = len(catalogs) - loaded
+        use_catalog_rag = st.checkbox(
+            "Use catalog as RAG context",
+            value=False,
+            help="When enabled, SQL from your local .xdm.catalog files is injected into Claude's prompt as reference patterns.",
+        )
+        st.caption(f"{loaded} catalog(s) loaded" + (f", {failed} failed" if failed else ""))
 
-    # Module filter
-    module_filter = st.radio(
-        "Module",
-        list(MODULE_PREFIX_MAP.keys()),
-        horizontal=True,
-    )
-    filtered_tables = filter_tables_by_module(module_filter)
-
-    # Table selector
-    selected_table = st.selectbox(
-        "Explore Table",
-        options=list(filtered_tables.keys()),
-        index=0,
-    )
-
-    if selected_table:
-        tbl = COMBINED_TABLES[selected_table]
-        desc = tbl["description"] if isinstance(tbl.get("description"), str) else " ".join(tbl.get("description", ""))
-        st.caption(desc)
-        pk = tbl.get("primary_key", "N/A")
-        if isinstance(pk, list):
-            pk = ", ".join(pk)
-        st.caption(f"**Primary Key:** `{pk}`")
-
-        # Support both "columns" (full schema) and "key_columns" (summary)
-        cols_dict = tbl.get("columns") or tbl.get("key_columns") or {}
-
-        # Column search
-        col_search = st.text_input("Search columns", key="col_search")
-        cols = cols_dict
-        if col_search:
-            cols = {
-                k: v for k, v in cols.items()
-                if col_search.upper() in k or col_search.lower() in v.get("desc", "").lower()
-            }
-
-        with st.expander(f"Columns ({len(cols)})", expanded=True):
-            for col_name, col_info in cols.items():
-                nullable_val = col_info.get("nullable")
-                nullable = "" if nullable_val is False else (" NULL" if nullable_val is True else "")
-                st.markdown(
-                    f"**`{col_name}`** `{col_info['type']}{nullable}`  \n"
-                    f"_{col_info.get('desc', '')}_"
-                )
-
-    st.divider()
-    st.subheader("📚 BIP Catalog (RAG)")
-    catalogs = load_catalog_library()
-    loaded = sum(1 for c in catalogs if not c.get("error"))
-    failed = len(catalogs) - loaded
-    use_catalog_rag = st.checkbox(
-        "Use catalog as RAG context",
-        value=False,
-        help="When enabled, SQL from your local .xdm.catalog files is injected into Claude's prompt as reference patterns.",
-    )
-    st.caption(f"{loaded} catalog(s) loaded" + (f", {failed} failed" if failed else ""))
-
-    # Debug-history RAG: feed past errors + their root-cause fixes back into the
-    # generator so it stops repeating mistakes. Populates as the Debug tab is used.
-    debug_records = load_debug_history()
-    use_debug_rag = st.checkbox(
-        "Use debug history (past fixes) as context",
-        value=True,
-        help="Injects root-cause fixes from your past Debug-tab sessions so the "
-             "generator avoids repeating those Oracle errors.",
-    )
-    st.caption(
-        f"{len(debug_records)} past fix(es) available"
-        if debug_records else "no debug history yet — use the 🐞 Debug tab to build it"
-    )
-
-    st.divider()
-    with st.expander("🔗 Table Relationships"):
-        for rel, join_clause in COMBINED_RELATIONSHIPS.items():
-            st.code(join_clause, language="sql")
-
-    with st.expander("📚 Supporting Tables"):
-        for tbl_name, desc in SUPPORTING_TABLES.items():
-            st.markdown(f"**`{tbl_name}`** - {desc}")
-
-    with st.expander("👁️ Views"):
-        for view_name, desc in VIEWS.items():
-            st.markdown(f"**`{view_name}`** - {desc}")
-
-    with st.expander("🔍 Lookup Values"):
-        for lookup_name, values in COMBINED_LOOKUPS.items():
-            st.markdown(f"**{lookup_name}:**")
-            for val in values:
-                st.markdown(f"- `{val}`")
+        # Debug-history RAG: feed past errors + their root-cause fixes back into the
+        # generator so it stops repeating mistakes. Populates as the Debug tab is used.
+        debug_records = load_debug_history()
+        use_debug_rag = st.checkbox(
+            "Use debug history (past fixes) as context",
+            value=True,
+            help="Injects root-cause fixes from your past Debug-tab sessions so the "
+                 "generator avoids repeating those Oracle errors.",
+        )
+        st.caption(
+            f"{len(debug_records)} past fix(es) available"
+            if debug_records else "no debug history yet — use the 🐞 Debug tab to build it"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -964,6 +894,46 @@ def parse_uploaded_file(uploaded_file):
 # ---------------------------------------------------------------------------
 # Claude API call
 # ---------------------------------------------------------------------------
+def _anthropic_user_content(user_msg, images):
+    """User-turn content for the Anthropic Messages API (base64 image blocks)."""
+    if not images:
+        return user_msg
+    return [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.standard_b64encode(raw).decode("utf-8"),
+            },
+        }
+        for media_type, raw in images
+    ] + [{"type": "text", "text": user_msg}]
+
+
+def _openai_user_content(user_msg, images):
+    """User-turn content for the OpenAI Chat Completions API (data-URL parts)."""
+    if not images:
+        return user_msg
+    return [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{media_type};base64,{base64.standard_b64encode(raw).decode('utf-8')}"},
+        }
+        for media_type, raw in images
+    ] + [{"type": "text", "text": user_msg}]
+
+
+def _gemini_contents(user_msg, images):
+    """Contents for the Gemini generate_content API (Part objects)."""
+    if not images:
+        return user_msg
+    return [
+        genai_types.Part.from_bytes(data=raw, mime_type=media_type)
+        for media_type, raw in images
+    ] + [user_msg]
+
+
 def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, images=None):
     """Dispatch one chat completion to the selected provider and return its text.
 
@@ -978,20 +948,6 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, i
     """
     if provider == "anthropic":
         client = anthropic.Anthropic(api_key=keys.get("anthropic", ""))
-        if images:
-            content = [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": base64.standard_b64encode(raw).decode("utf-8"),
-                    },
-                }
-                for media_type, raw in images
-            ] + [{"type": "text", "text": user_msg}]
-        else:
-            content = user_msg
         message = client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -1000,7 +956,7 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, i
                 "text": system_prompt,
                 "cache_control": {"type": "ephemeral"},
             }],
-            messages=[{"role": "user", "content": content}],
+            messages=[{"role": "user", "content": _anthropic_user_content(user_msg, images)}],
         )
         return next(block.text for block in message.content if block.type == "text")
 
@@ -1008,22 +964,12 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, i
         if not OPENAI_AVAILABLE:
             raise RuntimeError("openai package not installed. Run: pip install openai")
         client = OpenAI(api_key=keys.get("openai", ""))
-        if images:
-            content = [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{media_type};base64,{base64.standard_b64encode(raw).decode('utf-8')}"},
-                }
-                for media_type, raw in images
-            ] + [{"type": "text", "text": user_msg}]
-        else:
-            content = user_msg
         resp = client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content},
+                {"role": "user", "content": _openai_user_content(user_msg, images)},
             ],
         )
         return resp.choices[0].message.content
@@ -1032,16 +978,9 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, i
         if not GEMINI_AVAILABLE:
             raise RuntimeError("google-genai package not installed. Run: pip install google-genai")
         client = genai.Client(api_key=keys.get("gemini", ""))
-        if images:
-            contents = [
-                genai_types.Part.from_bytes(data=raw, mime_type=media_type)
-                for media_type, raw in images
-            ] + [user_msg]
-        else:
-            contents = user_msg
         resp = client.models.generate_content(
             model=model,
-            contents=contents,
+            contents=_gemini_contents(user_msg, images),
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 max_output_tokens=max_tokens,
@@ -1052,9 +991,74 @@ def _call_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, i
     raise ValueError(f"Unknown provider: {provider}")
 
 
+def _stream_llm(provider, model, system_prompt, user_msg, keys, max_tokens=4096, images=None):
+    """Streaming twin of _call_llm: yields text chunks as the model writes.
+
+    Used with st.write_stream so the SQL appears within a second or two
+    instead of behind a long spinner. Same prompt-caching behavior as
+    _call_llm on the Anthropic path.
+    """
+    if provider == "anthropic":
+        client = anthropic.Anthropic(api_key=keys.get("anthropic", ""))
+        with client.messages.stream(
+            model=model,
+            max_tokens=max_tokens,
+            system=[{
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": _anthropic_user_content(user_msg, images)}],
+        ) as stream:
+            yield from stream.text_stream
+        return
+
+    if provider == "openai":
+        if not OPENAI_AVAILABLE:
+            raise RuntimeError("openai package not installed. Run: pip install openai")
+        client = OpenAI(api_key=keys.get("openai", ""))
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            stream=True,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": _openai_user_content(user_msg, images)},
+            ],
+        )
+        for chunk in resp:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+        return
+
+    if provider == "gemini":
+        if not GEMINI_AVAILABLE:
+            raise RuntimeError("google-genai package not installed. Run: pip install google-genai")
+        client = genai.Client(api_key=keys.get("gemini", ""))
+        for chunk in client.models.generate_content_stream(
+            model=model,
+            contents=_gemini_contents(user_msg, images),
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=max_tokens,
+            ),
+        ):
+            if chunk.text:
+                yield chunk.text
+        return
+
+    raise ValueError(f"Unknown provider: {provider}")
+
+
 def generate_sql(user_prompt, provider, model, keys, images=None):
     """Generate SQL from natural language using the selected provider/model."""
     return _call_llm(provider, model, build_system_prompt(), user_prompt, keys, images=images)
+
+
+def generate_sql_stream(user_prompt, provider, model, keys, images=None):
+    """Streaming variant of generate_sql — yields text chunks for st.write_stream."""
+    return _stream_llm(provider, model, build_system_prompt(), user_prompt, keys, images=images)
 
 
 # ---------------------------------------------------------------------------
@@ -1227,101 +1231,140 @@ with st.container(border=True):
         st.code("Standard SQL", language=None)
     with ds_col3:
         st.markdown("**Modules Covered**")
-        st.markdown("Procurement | Suppliers | Items | Requisitions | AP | AR | OM | Shipping | Payments | Cash")
+        st.markdown(" ".join(
+            f":blue-badge[{m}]" for m in
+            ["Procurement", "Suppliers", "Items", "Requisitions", "AP", "AR",
+             "OM", "Shipping", "Payments", "Cash"]
+        ))
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🤖 AI Query Generator", "📝 Example Queries", "📖 Quick Reference", "📚 Catalog Library", "🗂️ Schema Explorer", "🐞 Debug"])
+# Readiness strip — tells a first-time user what works right now and what to
+# set up, instead of letting them find out from a failed Generate click.
+_key_ok = bool(keys.get(selected_provider))
+_status_bits = [
+    f"🤖 **{model_label.split(' — ')[0]}**",
+    ":green-badge[🔑 API key ready]" if _key_ok
+    else f":red-badge[🔑 {PROVIDER_LABELS[selected_provider]} key missing — open 🔑 AI Provider Keys in the sidebar]",
+    ":green-badge[🔌 Fusion connected]" if st.session_state.get("fusion_connected")
+    else ":gray-badge[🔌 Fusion not connected — live testing off]",
+]
+st.markdown(" &nbsp; ".join(_status_bits))
+
+# Five top-level tabs; Examples and Quick Reference share one "Reference"
+# tab as nested sub-tabs (tab2/tab3 below write into them).
+tab1, tab_ref, tab4, tab5, tab6 = st.tabs(["🤖 AI Query Generator", "📖 Reference & Examples", "📚 Catalog Library", "🗂️ Schema Explorer", "🐞 Debug"])
+with tab_ref:
+    tab2, tab3 = st.tabs(["📝 Example Queries", "📖 Quick Reference"])
 
 # ---- TAB 1: AI Generator ----
 with tab1:
     st.subheader("Describe the report you need")
 
-    # Quick prompt templates
-    quick_prompts = {
-        "-- Select a template --": "",
-        "PO listing with supplier": "List all approved purchase orders with PO number, supplier name, creation date, and total amount",
-        "PO lines with items": "Show PO number, line number, item number, item description, quantity, unit price, and line amount for all standard POs",
-        "Open POs pending receipt": "Find all approved PO lines where the quantity received is less than the quantity ordered, show PO number, line, item, ordered qty, received qty, and need-by date",
-        "PO approval history": "Show the full approval history for purchase orders including approver name, action taken, action date, and any notes",
-        "PO distributions with GL": "List PO distributions with the charge account (GL code combination segments), ordered/delivered/billed quantities",
-        "Blanket agreement utilization": "Show blanket purchase agreements with their agreed amount, amount released, remaining balance, and expiration date",
-        "POs by date range (parameterized)": "Create a parameterized report showing POs created between two dates with supplier name, PO amount, and status. Use BI Publisher parameters for the date range and business unit.",
-        "PO shipments with receiving": "Show PO shipments with scheduled delivery dates, actual receipt dates, and quantities for on-time delivery analysis",
-        "--- Order Management ---": "",
-        "Sales orders with customer": "List all open sales orders with order number, customer name, ordered date, currency, and status",
-        "Sales order lines with items": "Show sales order lines with item number, description, ordered quantity, unit price, extended amount, and scheduled ship date",
-        "--- Shipping ---": "",
-        "Shipments with tracking": "Show all shipments with delivery name, tracking/waybill number, carrier, ship date, delivery date, and weight",
-        "OM orders to shipment lines": "Join sales order headers and lines to shipping delivery details showing order number, line, item, ordered qty vs shipped qty, and tracking number",
-        "--- Financials ---": "",
-        "AP invoices by supplier": "List all AP invoices with invoice number, date, supplier name, amount, currency, payment status, and PO number if matched",
-        "AP invoice lines matched to PO": "Show AP invoice lines that are matched to purchase orders with the PO number, PO line, quantity invoiced, unit price, and amount",
-        "AR invoices by customer": "List AR transactions with transaction number, date, customer name, amount, currency, and status",
+    # Quick prompt templates, grouped by module — pills pick the module, the
+    # dropdown then only shows that module's templates (no fake separator rows).
+    TEMPLATE_GROUPS = {
+        "Procurement": {
+            "PO listing with supplier": "List all approved purchase orders with PO number, supplier name, creation date, and total amount",
+            "PO lines with items": "Show PO number, line number, item number, item description, quantity, unit price, and line amount for all standard POs",
+            "Open POs pending receipt": "Find all approved PO lines where the quantity received is less than the quantity ordered, show PO number, line, item, ordered qty, received qty, and need-by date",
+            "PO approval history": "Show the full approval history for purchase orders including approver name, action taken, action date, and any notes",
+            "PO distributions with GL": "List PO distributions with the charge account (GL code combination segments), ordered/delivered/billed quantities",
+            "Blanket agreement utilization": "Show blanket purchase agreements with their agreed amount, amount released, remaining balance, and expiration date",
+            "POs by date range (parameterized)": "Create a parameterized report showing POs created between two dates with supplier name, PO amount, and status. Use BI Publisher parameters for the date range and business unit.",
+            "PO shipments with receiving": "Show PO shipments with scheduled delivery dates, actual receipt dates, and quantities for on-time delivery analysis",
+        },
+        "Order Management": {
+            "Sales orders with customer": "List all open sales orders with order number, customer name, ordered date, currency, and status",
+            "Sales order lines with items": "Show sales order lines with item number, description, ordered quantity, unit price, extended amount, and scheduled ship date",
+        },
+        "Shipping": {
+            "Shipments with tracking": "Show all shipments with delivery name, tracking/waybill number, carrier, ship date, delivery date, and weight",
+            "OM orders to shipment lines": "Join sales order headers and lines to shipping delivery details showing order number, line, item, ordered qty vs shipped qty, and tracking number",
+        },
+        "Financials": {
+            "AP invoices by supplier": "List all AP invoices with invoice number, date, supplier name, amount, currency, payment status, and PO number if matched",
+            "AP invoice lines matched to PO": "Show AP invoice lines that are matched to purchase orders with the PO number, PO line, quantity invoiced, unit price, and amount",
+            "AR invoices by customer": "List AR transactions with transaction number, date, customer name, amount, currency, and status",
+        },
     }
 
-    selected_template = st.selectbox("Quick templates", options=list(quick_prompts.keys()))
+    template_group = st.pills(
+        "Quick templates",
+        options=list(TEMPLATE_GROUPS.keys()),
+        default="Procurement",
+        key="template_group",
+    )
+    group_templates = TEMPLATE_GROUPS.get(template_group, {})
+    selected_template = st.selectbox(
+        "Template",
+        options=["-- Select a template --"] + list(group_templates.keys()),
+        label_visibility="collapsed",
+    )
 
     user_input = st.text_area(
         "Describe your report in plain English:",
-        value=quick_prompts.get(selected_template, ""),
+        value=group_templates.get(selected_template, ""),
         height=120,
         placeholder="e.g., Show me all approved POs from last month with supplier name, item details, and total line amounts...",
     )
 
-    # File upload for existing client reports
+    # Attachments — one drop zone for client reports (Excel/CSV) and
+    # screenshots; files are routed by extension.
     st.markdown("---")
-    st.markdown("**Attach a client report to reverse-engineer the SQL**")
-    uploaded_file = st.file_uploader(
-        "Upload an Excel or CSV file",
-        type=["xlsx", "xls", "csv"],
-        help="Upload a client's existing report (Excel/CSV). The app will analyze the columns and sample data to generate matching SQL from Oracle Fusion tables.",
-    )
-
-    file_summary = None
-    if uploaded_file is not None:
-        df_preview, file_summary = parse_uploaded_file(uploaded_file)
-        if df_preview is not None:
-            with st.expander(f"Preview: {uploaded_file.name} ({len(df_preview)} rows, {len(df_preview.columns)} cols)", expanded=True):
-                st.dataframe(df_preview.head(20), width="stretch")
-        else:
-            st.error(file_summary)
-            file_summary = None
-
-    # Screenshot upload — the model analyzes the image(s) to reverse-engineer the SQL
-    st.markdown("**Attach screenshots to analyze**")
-    uploaded_images = st.file_uploader(
-        "Upload screenshots (PNG/JPG)",
-        type=["png", "jpg", "jpeg", "gif", "webp"],
+    st.markdown("**Attach files to reverse-engineer the SQL** — client reports (Excel/CSV) and/or screenshots")
+    uploaded_files = st.file_uploader(
+        "Upload Excel, CSV, or image files",
+        type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "gif", "webp"],
         accept_multiple_files=True,
-        help="Upload screenshots of an existing report, a BI Publisher layout, or a Fusion screen. "
-             "The AI reads the visible columns, headers, and sample values and generates SQL that reproduces them.",
+        help="Attach a client's existing report (Excel/CSV) and/or screenshots of a report, "
+             "BI Publisher layout, or Fusion screen. The AI analyzes the columns, headers, and "
+             "sample values and generates matching SQL from Oracle Fusion tables.",
     )
 
     IMAGE_MIME_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
                         "gif": "image/gif", "webp": "image/webp"}
     MAX_IMAGE_BYTES = 5 * 1024 * 1024  # provider per-image limit (Anthropic: 5 MB)
 
+    file_summaries = []
     screenshot_images = []
-    if uploaded_images:
-        preview_cols = st.columns(min(len(uploaded_images), 3))
-        for i, img_file in enumerate(uploaded_images):
-            raw = img_file.getvalue()
+    _image_files = []
+    for up in uploaded_files or []:
+        ext = up.name.rsplit(".", 1)[-1].lower()
+        if ext in IMAGE_MIME_TYPES:
+            raw = up.getvalue()
             if len(raw) > MAX_IMAGE_BYTES:
-                st.warning(f"**{img_file.name}** is {len(raw) / (1024 * 1024):.1f} MB — over the 5 MB "
+                st.warning(f"**{up.name}** is {len(raw) / (1024 * 1024):.1f} MB — over the 5 MB "
                            "per-image limit, so it will be skipped. Crop or compress it and re-upload.")
                 continue
-            ext = img_file.name.rsplit(".", 1)[-1].lower()
-            screenshot_images.append((IMAGE_MIME_TYPES.get(ext, "image/png"), raw))
+            screenshot_images.append((IMAGE_MIME_TYPES[ext], raw))
+            _image_files.append(up)
+        else:
+            df_preview, summary = parse_uploaded_file(up)
+            if df_preview is not None:
+                with st.expander(f"Preview: {up.name} ({len(df_preview)} rows, {len(df_preview.columns)} cols)", expanded=False):
+                    st.dataframe(df_preview.head(20), width="stretch")
+                file_summaries.append(summary)
+            else:
+                st.error(summary)
+
+    if _image_files:
+        preview_cols = st.columns(min(len(_image_files), 3))
+        for i, img_file in enumerate(_image_files):
             with preview_cols[i % len(preview_cols)]:
-                st.image(raw, caption=img_file.name, width="stretch")
+                st.image(img_file.getvalue(), caption=img_file.name, width="stretch")
+
+    file_summary = "\n\n".join(file_summaries) if file_summaries else None
 
     col1, col2 = st.columns([1, 4])
     with col1:
-        generate_btn = st.button("🚀 Generate SQL", type="primary", width="stretch")
+        generate_btn = st.button(
+            "🚀 Generate SQL", type="primary", width="stretch",
+            disabled=not keys.get(selected_provider),
+            help=(None if keys.get(selected_provider) else
+                  f"Enter your {PROVIDER_LABELS[selected_provider]} API key in the sidebar to enable."),
+        )
 
     if generate_btn:
-        if not keys.get(selected_provider):
-            st.error(f"Please enter your {PROVIDER_LABELS[selected_provider]} API key in the sidebar.")
-        elif not user_input.strip() and not file_summary and not screenshot_images:
+        if not user_input.strip() and not file_summary and not screenshot_images:
             st.warning("Please describe the report you need, attach a file, or add a screenshot.")
         else:
             # Build the full prompt
@@ -1356,15 +1399,23 @@ with tab1:
             elif file_summary or screenshot_images:
                 full_prompt += "Generate the SQL to recreate this report from Oracle Fusion Cloud tables.\n"
 
-            with st.spinner(f"{PROVIDER_LABELS[selected_provider]} is writing your SQL query..."):
-                try:
-                    result = generate_sql(full_prompt, selected_provider, selected_model, keys,
-                                          images=screenshot_images or None)
-                    st.session_state["last_result"] = result
-                except anthropic.AuthenticationError:
-                    st.error("Invalid Anthropic API key. Please check it in the sidebar.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+            # Stream the response so SQL starts appearing within a second or
+            # two; once complete, rerun so the result renders through the
+            # normal display path below (bind-param warnings, buttons, etc.).
+            try:
+                st.divider()
+                st.subheader("Generated SQL")
+                st.caption(f"{PROVIDER_LABELS[selected_provider]} is writing your SQL query...")
+                result = st.write_stream(
+                    generate_sql_stream(full_prompt, selected_provider, selected_model, keys,
+                                        images=screenshot_images or None)
+                )
+                st.session_state["last_result"] = result
+                st.rerun()
+            except anthropic.AuthenticationError:
+                st.error("Invalid Anthropic API key. Please check it in the sidebar.")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
     # Display result
     if "last_result" in st.session_state:
@@ -1450,6 +1501,51 @@ with tab1:
                     mime="text/csv",
                     key="dl_fusion_csv",
                 )
+
+        # Refine loop — nudge the generated SQL ("now add supplier site")
+        # without retyping the whole request. The previous SQL goes back to
+        # the model as context.
+        st.markdown("---")
+        st.markdown("**♻️ Refine this query**")
+        ref_col1, ref_col2 = st.columns([4, 1])
+        with ref_col1:
+            refine_input = st.text_input(
+                "Refine",
+                placeholder="e.g., add the supplier site code and filter by a :P_BU_ID parameter",
+                label_visibility="collapsed",
+                key="refine_input",
+            )
+        with ref_col2:
+            refine_btn = st.button(
+                "♻️ Refine", width="stretch",
+                disabled=not keys.get(selected_provider),
+                help=(None if keys.get(selected_provider) else
+                      f"Enter your {PROVIDER_LABELS[selected_provider]} API key in the sidebar to enable."),
+            )
+
+        if refine_btn:
+            if not refine_input.strip():
+                st.warning("Describe the change you want, e.g. 'add the buyer name column'.")
+            else:
+                prior_sql = clean_sql if (sql_start != -1 and sql_end != -1) else result_text
+                refine_prompt = (
+                    "Here is the BI Publisher SQL you previously generated:\n\n"
+                    f"```sql\n{prior_sql}\n```\n\n"
+                    f"Revise it per these instructions: {refine_input.strip()}\n"
+                    "Return the complete revised SQL and briefly note what changed."
+                )
+                try:
+                    st.caption(f"{PROVIDER_LABELS[selected_provider]} is revising your SQL...")
+                    result = st.write_stream(
+                        generate_sql_stream(refine_prompt, selected_provider, selected_model, keys)
+                    )
+                    st.session_state["last_result"] = result
+                    st.session_state.pop("fusion_result", None)  # stale for the revised SQL
+                    st.rerun()
+                except anthropic.AuthenticationError:
+                    st.error("Invalid Anthropic API key. Please check it in the sidebar.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 
 # ---- TAB 2: Examples ----
@@ -1589,6 +1685,27 @@ AND PHA.PRC_BU_ID = :P_BU_ID
                 mime="text/plain",
                 key=f"dl_wf_{name}",
             )
+
+    # Schema reference material (moved here from the sidebar)
+    st.divider()
+    st.markdown("### 🗃️ Schema Reference")
+    with st.expander("🔗 Table Relationships"):
+        for rel, join_clause in COMBINED_RELATIONSHIPS.items():
+            st.code(join_clause, language="sql")
+
+    with st.expander("📚 Supporting Tables"):
+        for tbl_name, desc in SUPPORTING_TABLES.items():
+            st.markdown(f"**`{tbl_name}`** - {desc}")
+
+    with st.expander("👁️ Views"):
+        for view_name, desc in VIEWS.items():
+            st.markdown(f"**`{view_name}`** - {desc}")
+
+    with st.expander("🔍 Lookup Values"):
+        for lookup_name, values in COMBINED_LOOKUPS.items():
+            st.markdown(f"**{lookup_name}:**")
+            for val in values:
+                st.markdown(f"- `{val}`")
 
 
 # ---- TAB 4: Catalog Library ----
